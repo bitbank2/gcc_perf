@@ -1,0 +1,25 @@
+GCC/SIMD/ASM PERFORMANCE TESTS
+
+Written by Larry Bank
+Project started 3/16/2016
+
+The gcc_perf project is to test the CPU performance (float/int) on ARM
+devices in 32-bit and 64-bit mode. The purpose is to see what the differences
+can be attributed to the execution mode and what can be attributed to the
+C compiler (GCC).
+
+Running the tests:
+------------------
+If you run the test programs with no parameters, they will run through
+every function and test the performance on small and large buffers. The
+numbers represent the time in milliseconds to run thousands of iterations
+of each test.
+
+A single numerical parameter will run a single test:
+gcc_perf 2 will run test number 2. To get a list of what functions
+are available use a parameter of -1. Here is sample output for
+one of the functions:
+
+Multiply Complex C (bigger than cache) = 5070ms
+Multiply Complex SIMD (bigger than cache) = 2604ms
+Multiply Complex ASM (bigger than cache) = 2554ms
