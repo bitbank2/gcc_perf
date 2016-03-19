@@ -27,8 +27,14 @@
 #include <stdbool.h>
 #include <time.h>
 #include <string.h>
+#ifdef USE_NEON
 #include <arm_neon.h>
-
+#endif
+#ifdef USE_SSE
+#include <emmintrin.h>
+#include <tmmintrin.h>
+#include <smmintrin.h>
+#endif
 typedef int (*PFNTEST)(void *src, void *dest, int iLen);
 
 typedef struct tagCOMPLEX
@@ -59,32 +65,48 @@ void RunTest(int iTest, int iMode, int iIterations, float *pFloatArray1, float *
 
 int c_integer_sum(void *in, void *out, int iLen);
 int simd_integer_sum(void *in, void *out, int iLen);
-extern int asm_integer_sum(void *in, void *out, int iLen);
 int c_float_sum(void *in, void *out, int iLen);
 int simd_float_sum(void *in, void *out, int iLen);
-extern int asm_float_sum(void *in, void *out, int iLen);
 int c_integer_diff(void *in, void *out, int iLen);
 int simd_integer_diff(void *in, void *out, int iLen);
-extern int asm_integer_diff(void *in, void *out, int iLen);
 int c_float_diff(void *in, void *out, int iLen);
 int simd_float_diff(void *in, void *out, int iLen);
-extern int asm_float_diff(void *in, void *out, int iLen);
 int c_float_max(void *in, void *out, int iLen);
 int simd_float_max(void *in, void *out, int iLen);
-extern int asm_float_max(void *in, void *out, int iLen);
 int c_integer_max(void *in, void *out, int iLen);
 int simd_integer_max(void *in, void *out, int iLen);
-extern int asm_integer_max(void *in, void *out, int iLen);
 int c_float_accumulate(void *in, void *out, int iLen);
 int simd_float_accumulate(void *in, void *out, int iLen);
-extern int asm_float_accumulate(void *in, void *out, int iLen);
 int c_integer_accumulate(void *in, void *out, int iLen);
 int simd_integer_accumulate(void *in, void *out, int iLen);
-extern int asm_integer_accumulate(void *in, void *out, int iLen);
-
 int c_multiply_complex(void *in, void *out, int iLen);
 int simd_multiply_complex(void *in, void *out, int iLen);
+
+// Using intrinsics in x86 land is sufficient. It's hard to
+// beat the compiler with hand written asm code for these
+// type of functions
+#ifdef USE_NEON
+extern int asm_integer_sum(void *in, void *out, int iLen);
+extern int asm_float_sum(void *in, void *out, int iLen);
+extern int asm_integer_diff(void *in, void *out, int iLen);
+extern int asm_float_diff(void *in, void *out, int iLen);
+extern int asm_float_max(void *in, void *out, int iLen);
+extern int asm_integer_max(void *in, void *out, int iLen);
+extern int asm_float_accumulate(void *in, void *out, int iLen);
+extern int asm_integer_accumulate(void *in, void *out, int iLen);
 extern int asm_multiply_complex(void *in, void *out, int iLen);
+#else
+int asm_integer_sum(void *in, void *out, int iLen) { return 0;};
+int asm_float_sum(void *in, void *out, int iLen) { return 0;};
+int asm_integer_diff(void *in, void *out, int iLen) { return 0;};
+int asm_float_diff(void *in, void *out, int iLen) { return 0;};
+int asm_integer_max(void *in, void *out, int iLen) { return 0;};
+int asm_float_max(void *in, void *out, int iLen) { return 0;};
+int asm_integer_accumulate(void *in, void *out, int iLen) { return 0;};
+int asm_float_accumulate(void *in, void *out, int iLen) { return 0;};
+int asm_multiply_complex(void *in, void *out, int iLen) { return 0;};
+
+#endif // USE_NEON
 
 #define TEST_COUNT 9
 // List of functions to test
@@ -118,6 +140,7 @@ char szColor[32];
 char *szUnColor;
 bool bPassed;
 bool bUseColor;
+char *szCPU;
 
 	printf("GCC_PERF tests 1.0\n");
 	printf("Written by Larry Bank\n");
@@ -143,10 +166,15 @@ bool bUseColor;
 		iEnd = TEST_COUNT - 1;
 	}
 
+#ifdef USE_NEON
+	szCPU = "ARM NEON";
+#else
+	szCPU = "Intel SSE";
+#endif
 	if (iStart == iEnd)
-		printf("running ARM NEON test %d, %d-bit word size\n", iStart, (int)sizeof(void *)*8);
+		printf("running %s test %d, %d-bit word size\n", szCPU, iStart, (int)sizeof(void *)*8);
 	else
-		printf("running ARM NEON tests %d-%d, %d-bit word size\n", iStart, iEnd, (int)sizeof(void *)*8);
+		printf("running %s tests %d-%d, %d-bit word size\n", szCPU, iStart, iEnd, (int)sizeof(void *)*8);
 
 	if (argc >= 3)
 	{	// no color
@@ -203,10 +231,12 @@ bool bUseColor;
 		RunTest(iTest, MODE_SIMD_PERF, iIterations, pFloatMem1, pFloatMem2, pIntMem1, pIntMem2, pDest, pCompare, &bPassed, iLen);
 		iTime = MilliTime() - iTime;
 		printf("%s%s%s SIMD (bigger than cache) = %dms\n", szColor, szLabel, szUnColor, iTime);
+#ifdef USE_NEON
 		iTime = MilliTime();
 		RunTest(iTest, MODE_ASM_PERF, iIterations, pFloatMem1, pFloatMem2, pIntMem1, pIntMem2, pDest, pCompare, &bPassed, iLen);
 		iTime = MilliTime() - iTime;
 		printf("%s%s%s ASM (bigger than cache) = %dms\n", szColor, szLabel, szUnColor, iTime);
+#endif
 		iTime = MilliTime();
 		RunTest(iTest, MODE_C_PERF, iIterations*0x1000, pFloatMem1, pFloatMem2, pIntMem1, pIntMem2, pDest, pCompare, &bPassed, iLen/0x1000);
 		iTime = MilliTime() - iTime;
@@ -215,10 +245,12 @@ bool bUseColor;
 		RunTest(iTest, MODE_SIMD_PERF, iIterations*0x1000, pFloatMem1, pFloatMem2, pIntMem1, pIntMem2, pDest, pCompare, &bPassed, iLen/0x1000);
 		iTime = MilliTime() - iTime;
 		printf("%s%s%s SIMD (smaller than cache) = %dms\n", szColor, szLabel, szUnColor, iTime);
+#ifdef USE_NEON
 		iTime = MilliTime();
 		RunTest(iTest, MODE_ASM_PERF, iIterations*0x1000, pFloatMem1, pFloatMem2, pIntMem1, pIntMem2, pDest, pCompare, &bPassed, iLen/0x1000);
 		iTime = MilliTime() - iTime;
 		printf("%s%s%s ASM (smaller than cache) = %dms\n", szColor, szLabel, szUnColor, iTime);
+#endif
 		iColor++;
 		if (iColor > 33) iColor = 32; // toggle between green and yellow for passing tests
 	}
@@ -283,6 +315,7 @@ void *pSrc1, *pSrc2;
 		{
 			printf("SIMD failed to compare\n");
 		}
+#ifdef USE_NEON
 		memcpy(pCompare, pSrc2, iLen * sizeof(int32_t));
 		(*testList[iTest].pASMFunc)(pSrc1, pCompare, iLen);
 		if (memcmp(pDest, pCompare, iSize*sizeof(int32_t)) == 0)
@@ -293,6 +326,9 @@ void *pSrc1, *pSrc2;
 		{
 			printf("ASM failed to compare\n");
 		}
+#else
+		bASM = true;
+#endif // USE_NEON
 		if (bASM && bSIMD)
 		{
 			*bPassed = true;
@@ -348,9 +384,13 @@ int i;
 COMPLEX *a = (COMPLEX *)in; // treat pairs of floats as Complex numbers
 COMPLEX *b = (COMPLEX *)out;
 
+    i = 0;
+
+#ifdef USE_NEON
+    {
     float32x4x2_t f32_a0, f32_a1, f32_b0, f32_b1, f32_c0, f32_c1;
 
-    for (i=0; i< (iLen/2)-7; i+= 8)
+    for (; i< (iLen/2)-7; i+= 8)
     {
         f32_a0 = vld2q_f32((float *)&a[i]); // separate the real/imaginary values while reading
         f32_b0 = vld2q_f32((float *)&b[i]);
@@ -369,6 +409,58 @@ COMPLEX *b = (COMPLEX *)out;
         vst2q_f32((float *)&b[i], f32_c0);
         vst2q_f32((float *)&b[i+4], f32_c1);
     }
+    }
+#endif // USE_NEON
+#ifdef USE_SSE
+    {
+    __m128 f32_a0, f32_a1, f32_a2, f32_a3;
+    __m128 f32_b0, f32_b1, f32_b2, f32_b3;
+    __m128 f32_ra0, f32_ra1, f32_rb0, f32_rb1;
+    __m128 f32_ia0, f32_ia1, f32_ib0, f32_ib1;
+
+    for (; i< (iLen/2)-7; i+= 8)
+    {
+	f32_a0 = _mm_loadu_ps((float *)&a[i]);
+	f32_b0 = _mm_loadu_ps((float *)&b[i]);
+	f32_a1 = _mm_loadu_ps((float *)&a[i+2]);
+	f32_b1 = _mm_loadu_ps((float *)&b[i+2]);
+	f32_a2 = _mm_loadu_ps((float *)&a[i+4]);
+	f32_b2 = _mm_loadu_ps((float *)&b[i+4]);
+	f32_a3 = _mm_loadu_ps((float *)&a[i+6]);
+	f32_b3 = _mm_loadu_ps((float *)&b[i+6]);
+	// separate real and imaginary values
+	f32_ra0 = _mm_shuffle_ps(f32_a0, f32_a1, _MM_SHUFFLE(2,0,2,0));
+	f32_ia0 = _mm_shuffle_ps(f32_a0, f32_a1, _MM_SHUFFLE(3,1,3,1));
+	f32_rb0 = _mm_shuffle_ps(f32_b0, f32_b1, _MM_SHUFFLE(2,0,2,0));
+	f32_ib0 = _mm_shuffle_ps(f32_b0, f32_b1, _MM_SHUFFLE(3,1,3,1));
+	f32_ra1 = _mm_shuffle_ps(f32_a2, f32_a3, _MM_SHUFFLE(2,0,2,0));
+	f32_ia1 = _mm_shuffle_ps(f32_a2, f32_a3, _MM_SHUFFLE(3,1,3,1));
+	f32_rb1 = _mm_shuffle_ps(f32_b2, f32_b3, _MM_SHUFFLE(2,0,2,0));
+	f32_ib1 = _mm_shuffle_ps(f32_b2, f32_b3, _MM_SHUFFLE(3,1,3,1));
+        f32_a0 = _mm_mul_ps(f32_ra0, f32_rb0); // r0 = a(real) * b(real)
+        f32_a1 = _mm_mul_ps(f32_ia0, f32_ib0); // r1 = a(imag) * b(imag)
+        f32_b0 = _mm_mul_ps(f32_ia0, f32_rb0); // r2 = a(imag) * b(real)
+        f32_b1 = _mm_mul_ps(f32_ra0, f32_ib0); // r3 = a(real) * b(imag)
+        f32_a2 = _mm_mul_ps(f32_ra1, f32_rb1); // r0 = a(real) * b(real)
+        f32_a3 = _mm_mul_ps(f32_ia1, f32_ib1); // r1 = a(imag) * b(imag)
+        f32_b2 = _mm_mul_ps(f32_ia1, f32_rb1); // r2 = a(imag) * b(real)
+        f32_b3 = _mm_mul_ps(f32_ra1, f32_ib1); // r3 = a(real) * b(imag)
+        f32_rb0 = _mm_sub_ps(f32_a0, f32_a1); // b(real) = r0 - r1
+        f32_ib0 = _mm_add_ps(f32_b0, f32_b1); // b(imag) = r2 + r3
+        f32_rb1 = _mm_sub_ps(f32_a2, f32_a3); // b(real) = r0 - r1
+        f32_ib1 = _mm_add_ps(f32_b2, f32_b3); // b(imag) = r2 + r3
+	// interleave r/i again
+	f32_a0 = (__m128)_mm_unpacklo_epi32((__m128i)f32_rb0, (__m128i)f32_ib0);
+	f32_a1 = (__m128)_mm_unpackhi_epi32((__m128i)f32_rb0, (__m128i)f32_ib0);
+	f32_a2 = (__m128)_mm_unpacklo_epi32((__m128i)f32_rb1, (__m128i)f32_ib1);
+	f32_a3 = (__m128)_mm_unpackhi_epi32((__m128i)f32_rb1, (__m128i)f32_ib1);
+        _mm_storeu_ps((float *)&b[i], f32_a0);
+        _mm_storeu_ps((float *)&b[i+2], f32_a1);
+        _mm_storeu_ps((float *)&b[i+4], f32_a2);
+        _mm_storeu_ps((float *)&b[i+6], f32_a3);
+    }
+    }
+#endif // USE_SSE
     return iLen;
 } /* simd_multiply_complex() */
 
@@ -389,13 +481,17 @@ int32_t *d = (int32_t *)out;
 // Add the values from 2 arrays and store in the destination array
 int simd_integer_sum(void *in, void *out, int iLen)
 {
-	int32x4_t i32_a0, i32_a1, i32_a2, i32_a3;
-	int32x4_t i32_b0, i32_b1, i32_b2, i32_b3;
-	int i;
-        int32_t *s = (int32_t *)in;
-	int32_t *d = (int32_t *)out;
+int i;
+int32_t *s = (int32_t *)in;
+int32_t *d = (int32_t *)out;
 
 	i = 0;
+
+#ifdef USE_NEON
+	{
+	int32x4_t i32_a0, i32_a1, i32_a2, i32_a3;
+	int32x4_t i32_b0, i32_b1, i32_b2, i32_b3;
+
 	for (; i<iLen-15; i+= 16) 	// do 16 at a time
 	{
 		i32_a0 = vld1q_s32(&s[i]);
@@ -417,10 +513,39 @@ int simd_integer_sum(void *in, void *out, int iLen)
 		vst1q_s32(&d[i+8], i32_a2);
 		vst1q_s32(&d[i+12], i32_a3);
 	}
+	}
+#endif // USE_NEON
+#ifdef USE_SSE
+	{
+	__m128i i32_a0, i32_a1, i32_a2, i32_a3;
+	__m128i i32_b0, i32_b1, i32_b2, i32_b3;
+
+	for (; i<iLen-15; i+= 16) 	// do 16 at a time
+	{
+		i32_a0 = _mm_loadu_si128((__m128i *)&s[i]);
+		i32_a1 = _mm_loadu_si128((__m128i *)&s[i+4]);
+		i32_a2 = _mm_loadu_si128((__m128i *)&s[i+8]);
+		i32_a3 = _mm_loadu_si128((__m128i *)&s[i+12]);
+		i32_b0 = _mm_loadu_si128((__m128i *)&d[i]);
+		i32_b1 = _mm_loadu_si128((__m128i *)&d[i+4]);
+		i32_b2 = _mm_loadu_si128((__m128i *)&d[i+8]);
+		i32_b3 = _mm_loadu_si128((__m128i *)&d[i+12]);
+		i32_a0 = _mm_add_epi32(i32_a0, i32_b0);
+		i32_a1 = _mm_add_epi32(i32_a1, i32_b1);
+		i32_a2 = _mm_add_epi32(i32_a2, i32_b2);
+		i32_a3 = _mm_add_epi32(i32_a3, i32_b3);
+		_mm_storeu_si128((__m128i*)&d[i], i32_a0);
+		_mm_storeu_si128((__m128i*)&d[i+4], i32_a1);
+		_mm_storeu_si128((__m128i*)&d[i+8], i32_a2);
+		_mm_storeu_si128((__m128i*)&d[i+12], i32_a3);
+	}
+	}
+#endif // USE_SSE
 	for (; i<iLen; i++)
 	{
 		d[i] = d[i] + s[i];
 	}
+
 	return iLen;
 } /* simd_integer_sum() */
 
@@ -441,13 +566,16 @@ float *d = (float *)out;
 // Add the values from 2 arrays and store in the destination array
 int simd_float_sum(void *in, void *out, int iLen)
 {
-	float32x4_t i32_a0, i32_a1, i32_a2, i32_a3;
-	float32x4_t i32_b0, i32_b1, i32_b2, i32_b3;
-	int i;
-        float *s = (float *)in;
-	float *d = (float *)out;
+int i;
+float *s = (float *)in;
+float *d = (float *)out;
 
 	i = 0;
+#ifdef USE_NEON
+	{
+	float32x4_t i32_a0, i32_a1, i32_a2, i32_a3;
+	float32x4_t i32_b0, i32_b1, i32_b2, i32_b3;
+
 	for (; i<iLen-15; i+= 16) 	// do 16 at a time
 	{
 		i32_a0 = vld1q_f32(&s[i]);
@@ -469,6 +597,35 @@ int simd_float_sum(void *in, void *out, int iLen)
 		vst1q_f32(&d[i+8], i32_a2);
 		vst1q_f32(&d[i+12], i32_a3);
 	}
+	}
+#endif // USE_NEON
+#ifdef USE_SSE
+	{
+	__m128 f32_a0, f32_a1, f32_a2, f32_a3;
+	__m128 f32_b0, f32_b1, f32_b2, f32_b3;
+
+	for (; i<iLen-15; i+= 16) 	// do 16 at a time
+	{
+		f32_a0 = _mm_loadu_ps(&s[i]);
+		f32_a1 = _mm_loadu_ps(&s[i+4]);
+		f32_a2 = _mm_loadu_ps(&s[i+8]);
+		f32_a3 = _mm_loadu_ps(&s[i+12]);
+		f32_b0 = _mm_loadu_ps(&d[i]);
+		f32_b1 = _mm_loadu_ps(&d[i+4]);
+		f32_b2 = _mm_loadu_ps(&d[i+8]);
+		f32_b3 = _mm_loadu_ps(&d[i+12]);
+		f32_a0 = _mm_add_ps(f32_a0, f32_b0);
+		f32_a1 = _mm_add_ps(f32_a1, f32_b1);
+		f32_a2 = _mm_add_ps(f32_a2, f32_b2);
+		f32_a3 = _mm_add_ps(f32_a3, f32_b3);
+		_mm_storeu_ps(&d[i], f32_a0);
+		_mm_storeu_ps(&d[i+4], f32_a1);
+		_mm_storeu_ps(&d[i+8], f32_a2);
+		_mm_storeu_ps(&d[i+12], f32_a3);
+	}
+	}
+#endif // USE_SSE
+
 	for (; i<iLen; i++)
 	{
 		d[i] = d[i] + s[i];
@@ -493,13 +650,16 @@ int32_t *d = (int32_t *)out;
 // Subtract the values from 2 arrays and store in the destination array
 int simd_integer_diff(void *in, void *out, int iLen)
 {
-	int32x4_t i32_a0, i32_a1, i32_a2, i32_a3;
-	int32x4_t i32_b0, i32_b1, i32_b2, i32_b3;
-	int i;
-        int32_t *s = (int32_t *)in;
-	int32_t *d = (int32_t *)out;
+int i;
+int32_t *s = (int32_t *)in;
+int32_t *d = (int32_t *)out;
 
 	i = 0;
+#ifdef USE_NEON
+	{
+	int32x4_t i32_a0, i32_a1, i32_a2, i32_a3;
+	int32x4_t i32_b0, i32_b1, i32_b2, i32_b3;
+
 	for (; i<iLen-15; i+= 16) 	// do 16 at a time
 	{
 		i32_a0 = vld1q_s32(&s[i]);
@@ -521,6 +681,35 @@ int simd_integer_diff(void *in, void *out, int iLen)
 		vst1q_s32(&d[i+8], i32_a2);
 		vst1q_s32(&d[i+12], i32_a3);
 	}
+	}
+#endif // USE_NEON
+#ifdef USE_SSE
+	{
+	__m128i i32_a0, i32_a1, i32_a2, i32_a3;
+	__m128i i32_b0, i32_b1, i32_b2, i32_b3;
+
+	for (; i<iLen-15; i+= 16) 	// do 16 at a time
+	{
+		i32_a0 = _mm_loadu_si128((__m128i *)&s[i]);
+		i32_a1 = _mm_loadu_si128((__m128i *)&s[i+4]);
+		i32_a2 = _mm_loadu_si128((__m128i *)&s[i+8]);
+		i32_a3 = _mm_loadu_si128((__m128i *)&s[i+12]);
+		i32_b0 = _mm_loadu_si128((__m128i *)&d[i]);
+		i32_b1 = _mm_loadu_si128((__m128i *)&d[i+4]);
+		i32_b2 = _mm_loadu_si128((__m128i *)&d[i+8]);
+		i32_b3 = _mm_loadu_si128((__m128i *)&d[i+12]);
+		i32_a0 = _mm_sub_epi32(i32_a0, i32_b0);
+		i32_a1 = _mm_sub_epi32(i32_a1, i32_b1);
+		i32_a2 = _mm_sub_epi32(i32_a2, i32_b2);
+		i32_a3 = _mm_sub_epi32(i32_a3, i32_b3);
+		_mm_storeu_si128((__m128i*)&d[i], i32_a0);
+		_mm_storeu_si128((__m128i*)&d[i+4], i32_a1);
+		_mm_storeu_si128((__m128i*)&d[i+8], i32_a2);
+		_mm_storeu_si128((__m128i*)&d[i+12], i32_a3);
+	}
+	}
+#endif // USE_SSE
+
 	for (; i<iLen; i++)
 	{
 		d[i] = s[i] - d[i];
@@ -545,13 +734,17 @@ float *d = (float *)out;
 // Subtract the values from 2 arrays and store in the destination array
 int simd_float_diff(void *in, void *out, int iLen)
 {
-	float32x4_t i32_a0, i32_a1, i32_a2, i32_a3;
-	float32x4_t i32_b0, i32_b1, i32_b2, i32_b3;
-	int i;
-        float *s = (float *)in;
-	float *d = (float *)out;
+int i;
+float *s = (float *)in;
+float *d = (float *)out;
 
 	i = 0;
+
+#ifdef USE_NEON
+	{
+	float32x4_t i32_a0, i32_a1, i32_a2, i32_a3;
+	float32x4_t i32_b0, i32_b1, i32_b2, i32_b3;
+
 	for (; i<iLen-15; i+= 16) 	// do 16 at a time
 	{
 		i32_a0 = vld1q_f32(&s[i]);
@@ -573,6 +766,35 @@ int simd_float_diff(void *in, void *out, int iLen)
 		vst1q_f32(&d[i+8], i32_a2);
 		vst1q_f32(&d[i+12], i32_a3);
 	}
+	}
+#endif // USE_NEON
+#ifdef USE_SSE
+	{
+	__m128 f32_a0, f32_a1, f32_a2, f32_a3;
+	__m128 f32_b0, f32_b1, f32_b2, f32_b3;
+
+	for (; i<iLen-15; i+= 16) 	// do 16 at a time
+	{
+		f32_a0 = _mm_loadu_ps(&s[i]);
+		f32_a1 = _mm_loadu_ps(&s[i+4]);
+		f32_a2 = _mm_loadu_ps(&s[i+8]);
+		f32_a3 = _mm_loadu_ps(&s[i+12]);
+		f32_b0 = _mm_loadu_ps(&d[i]);
+		f32_b1 = _mm_loadu_ps(&d[i+4]);
+		f32_b2 = _mm_loadu_ps(&d[i+8]);
+		f32_b3 = _mm_loadu_ps(&d[i+12]);
+		f32_a0 = _mm_sub_ps(f32_a0, f32_b0);
+		f32_a1 = _mm_sub_ps(f32_a1, f32_b1);
+		f32_a2 = _mm_sub_ps(f32_a2, f32_b2);
+		f32_a3 = _mm_sub_ps(f32_a3, f32_b3);
+		_mm_storeu_ps(&d[i], f32_a0);
+		_mm_storeu_ps(&d[i+4], f32_a1);
+		_mm_storeu_ps(&d[i+8], f32_a2);
+		_mm_storeu_ps(&d[i+12], f32_a3);
+	}
+	}
+#endif // USE_SSE
+
 	for (; i<iLen; i++)
 	{
 		d[i] = s[i] - d[i];
@@ -604,6 +826,8 @@ int i;
 float *s = (float *)in;
 float *d = (float *)out;
 
+#ifdef USE_NEON
+	{
 	float32x4_t xmmCur0, xmmCur1, xmmCur2, xmmCur3;
 	float32x4_t xmmMax0, xmmMax1, xmmMax2, xmmMax3;
 
@@ -632,7 +856,42 @@ float *d = (float *)out;
         xmmCur0 = vextq_f32(xmmMax0, xmmMax0, 1); // compare last 2 values
         xmmMax0 = vmaxq_f32(xmmCur0, xmmMax0); // keep max 1
         d[0] = vgetq_lane_f32(xmmMax0, 0);
-        
+	}
+#endif // USE_NEON
+#ifdef USE_SSE
+	{
+	__m128 xmmCur0, xmmCur1, xmmCur2, xmmCur3;
+	__m128 xmmMax0, xmmMax1, xmmMax2, xmmMax3;
+	float kludge[4];
+
+        xmmMax0 = _mm_loadu_ps(&s[0]);
+        xmmMax1 = _mm_loadu_ps(&s[4]);
+        xmmMax2 = _mm_loadu_ps(&s[8]);
+        xmmMax3 = _mm_loadu_ps(&s[12]);
+        for (i=16; i< iLen-15; i+=16)
+        {
+            xmmCur0 = _mm_loadu_ps(&s[i]);
+            xmmCur1 = _mm_loadu_ps(&s[i+4]);
+            xmmCur2 = _mm_loadu_ps(&s[i+8]);
+            xmmCur3 = _mm_loadu_ps(&s[i+12]);
+            xmmMax0 = _mm_max_ps(xmmCur0, xmmMax0); // hold on to the max 4 values
+	    xmmMax1 = _mm_max_ps(xmmCur1, xmmMax1);
+	    xmmMax2 = _mm_max_ps(xmmCur2, xmmMax2);
+	    xmmMax3 = _mm_max_ps(xmmCur3, xmmMax3);
+        }
+	xmmMax0 = _mm_max_ps(xmmMax0, xmmMax1);
+	xmmMax0 = _mm_max_ps(xmmMax0, xmmMax2);
+	xmmMax0 = _mm_max_ps(xmmMax0, xmmMax3);
+        // now we have the 4 max values, reduce to 1
+        xmmCur0 = (__m128)_mm_srli_si128((__m128i)xmmMax0, 8); // compare upper and lower 2 values
+        xmmMax0 = _mm_max_ps(xmmCur0, xmmMax0); // keep max 2
+        xmmCur0 = (__m128)_mm_srli_si128((__m128i)xmmMax0, 4); // compare last 2 values
+        xmmMax0 = _mm_max_ps(xmmCur0, xmmMax0); // keep max 1
+	_mm_storeu_ps(&kludge[0], xmmMax0); // no float extract in SSE/SSE2/SSE4
+        d[0] = kludge[0];
+	}
+#endif // USE_SSE
+
 	return 1;
 } /* simd_float_max() */
 
@@ -660,6 +919,8 @@ int i;
 int32_t *s = (int32_t *)in;
 int32_t *d = (int32_t *)out;
 
+#ifdef USE_NEON
+	{
 	int32x4_t xmmCur0, xmmCur1, xmmCur2, xmmCur3;
 	int32x4_t xmmMax0, xmmMax1, xmmMax2, xmmMax3;
 
@@ -688,6 +949,40 @@ int32_t *d = (int32_t *)out;
         xmmCur0 = vextq_s32(xmmMax0, xmmMax0, 1); // compare last 2 values
         xmmMax0 = vmaxq_s32(xmmCur0, xmmMax0); // keep max 1
         d[0] = vgetq_lane_s32(xmmMax0, 0);
+	}
+#endif // USE_NEON
+#ifdef USE_SSE
+	{
+	__m128i xmmCur0, xmmCur1, xmmCur2, xmmCur3;
+	__m128i xmmMax0, xmmMax1, xmmMax2, xmmMax3;
+
+        xmmMax0 = _mm_loadu_si128((__m128i *)&s[0]);
+        xmmMax1 = _mm_loadu_si128((__m128i *)&s[4]);
+        xmmMax2 = _mm_loadu_si128((__m128i *)&s[8]);
+        xmmMax3 = _mm_loadu_si128((__m128i *)&s[12]);
+        for (i=16; i< iLen-15; i+=16)
+        {
+            xmmCur0 = _mm_loadu_si128((__m128i *)&s[i]);
+            xmmCur1 = _mm_loadu_si128((__m128i *)&s[i+4]);
+            xmmCur2 = _mm_loadu_si128((__m128i *)&s[i+8]);
+            xmmCur3 = _mm_loadu_si128((__m128i *)&s[i+12]);
+            xmmMax0 = _mm_max_epi32(xmmCur0, xmmMax0); // hold on to the max 4 values
+	    xmmMax1 = _mm_max_epi32(xmmCur1, xmmMax1);
+	    xmmMax2 = _mm_max_epi32(xmmCur2, xmmMax2);
+	    xmmMax3 = _mm_max_epi32(xmmCur3, xmmMax3);
+        }
+	xmmMax0 = _mm_max_epi32(xmmMax0, xmmMax1);
+	xmmMax0 = _mm_max_epi32(xmmMax0, xmmMax2);
+	xmmMax0 = _mm_max_epi32(xmmMax0, xmmMax3);
+        // now we have the 4 max values, reduce to 1
+        xmmCur0 = _mm_srli_si128(xmmMax0, 8); // compare upper and lower 2 values
+        xmmMax0 = _mm_max_epi32(xmmCur0, xmmMax0); // keep max 2
+        xmmCur0 = _mm_srli_si128(xmmMax0, 4); // compare last 2 values
+        xmmMax0 = _mm_max_epi32(xmmCur0, xmmMax0); // keep max 1
+        d[0] = _mm_cvtsi128_si32(xmmMax0);
+	}
+#endif // USE_SSE
+
 	return 1;
 } /* simd_integer_max() */
 
@@ -710,15 +1005,19 @@ float sum = 0.0;
 // Calculate the sum of all values in an array
 int simd_float_accumulate(void *in, void *out, int iLen)
 {
-	float32x4_t f32_a0, f32_a1, f32_a2, f32_a3, f32_sum;
-        float32x2_t f32_sum_narrow;
-	int i;
-	float fSum;
-        float *s = (float *)in;
-	float *d = (float *)out;
+int i;
+float fSum;
+float *s = (float *)in;
+float *d = (float *)out;
 
 	i = 0;
         fSum = 0.0;
+
+#ifdef USE_NEON
+	{
+	float32x4_t f32_a0, f32_a1, f32_a2, f32_a3, f32_sum;
+        float32x2_t f32_sum_narrow;
+
         f32_sum = vdupq_n_f32(0.0);
 	for (; i<iLen-15; i+= 16) 	// do 16 at a time
 	{
@@ -734,6 +1033,32 @@ int simd_float_accumulate(void *in, void *out, int iLen)
         f32_sum_narrow = vadd_f32(vget_high_f32(f32_sum), vget_low_f32(f32_sum));
         f32_sum_narrow = vpadd_f32(f32_sum_narrow, f32_sum_narrow);
         fSum = vget_lane_f32(f32_sum_narrow, 0);
+	}
+#endif // USE_NEON
+#ifdef USE_SSE
+	{
+	__m128 f32_a0, f32_a1, f32_a2, f32_a3, f32_sum;
+	float kludge[4];
+
+        f32_sum = _mm_set1_ps(0.0);
+	for (; i<iLen-15; i+= 16) 	// do 16 at a time
+	{
+		f32_a0 = _mm_loadu_ps(&s[i]);
+		f32_a1 = _mm_loadu_ps(&s[i+4]);
+		f32_a2 = _mm_loadu_ps(&s[i+8]);
+		f32_a3 = _mm_loadu_ps(&s[i+12]);
+		f32_a0 = _mm_add_ps(f32_a0, f32_a1);
+		f32_a1 = _mm_add_ps(f32_a2, f32_a3);
+                f32_sum = _mm_add_ps(f32_sum, f32_a0);
+                f32_sum = _mm_add_ps(f32_sum, f32_a1);
+	}
+        f32_sum = _mm_add_ps(f32_sum, (__m128)_mm_srli_si128((__m128i)f32_sum, 8));
+        f32_sum = _mm_add_ps(f32_sum, (__m128)_mm_srli_si128((__m128i)f32_sum, 4));
+	_mm_storeu_ps(&kludge[0], f32_sum);
+        fSum = kludge[0];
+	}
+#endif // USE_SSE
+
 	for (; i<iLen; i++)
 	{
 		fSum += s[i];
@@ -761,15 +1086,19 @@ int sum = 0;
 // Calculate the sum of all values in an array
 int simd_integer_accumulate(void *in, void *out, int iLen)
 {
-	int32x4_t i32_a0, i32_a1, i32_a2, i32_a3, i32_sum;
-        int32x2_t i32_sum_narrow;
-	int i;
-	int32_t iSum;
-        int32_t *s = (int32_t *)in;
-	int32_t *d = (int32_t *)out;
+int i;
+int32_t iSum;
+int32_t *s = (int32_t *)in;
+int32_t *d = (int32_t *)out;
 
 	i = 0;
         iSum = 0;
+
+#ifdef USE_NEON
+	{
+	int32x4_t i32_a0, i32_a1, i32_a2, i32_a3, i32_sum;
+        int32x2_t i32_sum_narrow;
+
         i32_sum = vdupq_n_s32(0);
 	for (; i<iLen-15; i+= 16) 	// do 16 at a time
 	{
@@ -785,6 +1114,29 @@ int simd_integer_accumulate(void *in, void *out, int iLen)
         i32_sum_narrow = vadd_s32(vget_high_s32(i32_sum), vget_low_s32(i32_sum));
         i32_sum_narrow = vpadd_s32(i32_sum_narrow, i32_sum_narrow);
         iSum = vget_lane_s32(i32_sum_narrow, 0);
+	}
+#endif // USE_NEON
+#ifdef USE_SSE
+	{
+	__m128i i32_a0, i32_a1, i32_a2, i32_a3, i32_sum;
+
+        i32_sum = _mm_set1_epi32(0);
+	for (; i<iLen-15; i+= 16) 	// do 16 at a time
+	{
+		i32_a0 = _mm_loadu_si128((__m128i*)&s[i]);
+		i32_a1 = _mm_loadu_si128((__m128i*)&s[i+4]);
+		i32_a2 = _mm_loadu_si128((__m128i*)&s[i+8]);
+		i32_a3 = _mm_loadu_si128((__m128i*)&s[i+12]);
+		i32_a0 = _mm_add_epi32(i32_a0, i32_a1);
+		i32_a1 = _mm_add_epi32(i32_a2, i32_a3);
+                i32_sum = _mm_add_epi32(i32_sum, i32_a0);
+                i32_sum = _mm_add_epi32(i32_sum, i32_a1);
+	}
+        i32_sum = _mm_add_epi32(i32_sum, _mm_srli_si128(i32_sum, 8));
+        i32_sum = _mm_add_epi32(i32_sum, _mm_srli_si128(i32_sum, 4));
+        iSum = _mm_cvtsi128_si32(i32_sum);
+	}
+#endif // USE_SSE
 	for (; i<iLen; i++)
 	{
 		iSum += s[i];

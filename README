@@ -3,14 +3,14 @@ GCC/SIMD/ASM PERFORMANCE TESTS
 Written by Larry Bank
 Project started 3/16/2016
 
-The gcc_perf project is to test the CPU performance (float/int) on ARM
+The gcc_perf project is to test the CPU performance (float/int) on Intel+ARM
 devices in 32-bit and 64-bit mode. The purpose is to see what the differences
 can be attributed to the execution mode and what can be attributed to the
 C compiler (GCC).
 
 Running the tests:
 ------------------
-If you run the test programs with no parameters, they will run through
+If you run the test program with no parameters, it will run through
 every function and test the performance on small and large buffers. The
 numbers represent the time in milliseconds to run thousands of iterations
 of each test.
