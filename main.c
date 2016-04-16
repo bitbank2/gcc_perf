@@ -106,11 +106,22 @@ int asm_integer_accumulate(void *in, void *out, int iLen) { return 0;};
 int asm_float_accumulate(void *in, void *out, int iLen) { return 0;};
 int asm_multiply_complex(void *in, void *out, int iLen) { return 0;};
 
+int c_writebuf_byte(void *in, void *out, int iLen);
+int c_writebuf_byte_coalesced(void *in, void *out, int iLen);
+int c_writebuf_short(void *in, void *out, int iLen);
+int c_writebuf_word(void *in, void *out, int iLen);
+int c_writebuf_long(void *in, void *out, int iLen);
+
 #endif // USE_NEON
 
-#define TEST_COUNT 9
+#define TEST_COUNT 14
 // List of functions to test
 TESTS testList[TEST_COUNT] = {
+{"Write buffer - byte", c_writebuf_byte, NULL, NULL, false},
+{"Write buffer - byte - coalesced", c_writebuf_byte_coalesced, NULL, NULL, false},
+{"Write buffer - short (16-bits)", c_writebuf_short, NULL, NULL, false},
+{"Write buffer - word (32-bits)", c_writebuf_word, NULL, NULL, false},
+{"Write buffer - long (64-bits)", c_writebuf_long, NULL, NULL, false},
 {"Multiply Complex",c_multiply_complex, simd_multiply_complex, asm_multiply_complex, true},
 {"Integer Sum",c_integer_sum, simd_integer_sum, asm_integer_sum, false},
 {"Float Sum",c_float_sum, simd_float_sum, asm_float_sum, true},
@@ -213,43 +224,64 @@ char *szCPU;
 	for (iTest=iStart; iTest <= iEnd; iTest++)
 	{
 		szLabel = testList[iTest].szTestName;
-		RunTest(iTest, MODE_VALIDATE, iIterations, pFloatMem1, pFloatMem2, pIntMem1, pIntMem2, pDest, pCompare, &bPassed, iLen);
-		if (!bPassed)
+		if (testList[iTest].pSIMDFunc && testList[iTest].pASMFunc)
 		{
-			printf("\033[1;31m%s\033[0m failed\n", szLabel);
-			continue;
+			RunTest(iTest, MODE_VALIDATE, iIterations, pFloatMem1, pFloatMem2, pIntMem1, pIntMem2, pDest, pCompare, &bPassed, iLen);
+			if (!bPassed)
+			{
+				printf("\033[1;31m%s\033[0m failed\n", szLabel);
+				continue;
+			}
 		}
 		if (bUseColor)
 		{
 			sprintf(szColor, "\033[1;%dm", iColor);
 		}
-		iTime = MilliTime();
-		RunTest(iTest, MODE_C_PERF, iIterations, pFloatMem1, pFloatMem2, pIntMem1, pIntMem2, pDest, pCompare, &bPassed, iLen);
-		iTime = MilliTime() - iTime;
-		printf("%s%s%s C (bigger than cache) = %dms\n", szColor, szLabel, szUnColor, iTime);
-		iTime = MilliTime();
-		RunTest(iTest, MODE_SIMD_PERF, iIterations, pFloatMem1, pFloatMem2, pIntMem1, pIntMem2, pDest, pCompare, &bPassed, iLen);
-		iTime = MilliTime() - iTime;
-		printf("%s%s%s SIMD (bigger than cache) = %dms\n", szColor, szLabel, szUnColor, iTime);
+		if (testList[iTest].pCFunc)
+		{
+			iTime = MilliTime();
+			RunTest(iTest, MODE_C_PERF, iIterations, pFloatMem1, pFloatMem2, pIntMem1, pIntMem2, pDest, pCompare, &bPassed, iLen);
+			iTime = MilliTime() - iTime;
+			printf("%s%s%s C (bigger than cache) = %dms\n", szColor, szLabel, szUnColor, iTime);
+		}
+		if (testList[iTest].pSIMDFunc)
+		{
+			iTime = MilliTime();
+			RunTest(iTest, MODE_SIMD_PERF, iIterations, pFloatMem1, pFloatMem2, pIntMem1, pIntMem2, pDest, pCompare, &bPassed, iLen);
+			iTime = MilliTime() - iTime;
+			printf("%s%s%s SIMD (bigger than cache) = %dms\n", szColor, szLabel, szUnColor, iTime);
+		}
 #ifdef USE_NEON
-		iTime = MilliTime();
-		RunTest(iTest, MODE_ASM_PERF, iIterations, pFloatMem1, pFloatMem2, pIntMem1, pIntMem2, pDest, pCompare, &bPassed, iLen);
-		iTime = MilliTime() - iTime;
-		printf("%s%s%s ASM (bigger than cache) = %dms\n", szColor, szLabel, szUnColor, iTime);
+		if (testList[iTest].pASMFunc)
+		{
+			iTime = MilliTime();
+			RunTest(iTest, MODE_ASM_PERF, iIterations, pFloatMem1, pFloatMem2, pIntMem1, pIntMem2, pDest, pCompare, &bPassed, iLen);
+			iTime = MilliTime() - iTime;
+			printf("%s%s%s ASM (bigger than cache) = %dms\n", szColor, szLabel, szUnColor, iTime);
+		}
 #endif
-		iTime = MilliTime();
-		RunTest(iTest, MODE_C_PERF, iIterations*0x1000, pFloatMem1, pFloatMem2, pIntMem1, pIntMem2, pDest, pCompare, &bPassed, iLen/0x1000);
-		iTime = MilliTime() - iTime;
-		printf("%s%s%s C (smaller than cache) = %dms\n", szColor, szLabel, szUnColor, iTime);
-		iTime = MilliTime();
-		RunTest(iTest, MODE_SIMD_PERF, iIterations*0x1000, pFloatMem1, pFloatMem2, pIntMem1, pIntMem2, pDest, pCompare, &bPassed, iLen/0x1000);
-		iTime = MilliTime() - iTime;
-		printf("%s%s%s SIMD (smaller than cache) = %dms\n", szColor, szLabel, szUnColor, iTime);
+		if (testList[iTest].pCFunc)
+		{
+			iTime = MilliTime();
+			RunTest(iTest, MODE_C_PERF, iIterations*0x1000, pFloatMem1, pFloatMem2, pIntMem1, pIntMem2, pDest, pCompare, &bPassed, iLen/0x1000);
+			iTime = MilliTime() - iTime;
+			printf("%s%s%s C (smaller than cache) = %dms\n", szColor, szLabel, szUnColor, iTime);
+		}
+		if (testList[iTest].pSIMDFunc)
+		{
+			iTime = MilliTime();
+			RunTest(iTest, MODE_SIMD_PERF, iIterations*0x1000, pFloatMem1, pFloatMem2, pIntMem1, pIntMem2, pDest, pCompare, &bPassed, iLen/0x1000);
+			iTime = MilliTime() - iTime;
+			printf("%s%s%s SIMD (smaller than cache) = %dms\n", szColor, szLabel, szUnColor, iTime);
+		}
 #ifdef USE_NEON
-		iTime = MilliTime();
-		RunTest(iTest, MODE_ASM_PERF, iIterations*0x1000, pFloatMem1, pFloatMem2, pIntMem1, pIntMem2, pDest, pCompare, &bPassed, iLen/0x1000);
-		iTime = MilliTime() - iTime;
-		printf("%s%s%s ASM (smaller than cache) = %dms\n", szColor, szLabel, szUnColor, iTime);
+		if (testList[iTest].pASMFunc)
+		{
+			iTime = MilliTime();
+			RunTest(iTest, MODE_ASM_PERF, iIterations*0x1000, pFloatMem1, pFloatMem2, pIntMem1, pIntMem2, pDest, pCompare, &bPassed, iLen/0x1000);
+			iTime = MilliTime() - iTime;
+			printf("%s%s%s ASM (smaller than cache) = %dms\n", szColor, szLabel, szUnColor, iTime);
+		}
 #endif
 		iColor++;
 		if (iColor > 33) iColor = 32; // toggle between green and yellow for passing tests
@@ -358,6 +390,134 @@ void *pSrc1, *pSrc2;
 } /* RunTest() */
 
 // Perf test functions (C and SIMD). ASM is in a separate file
+
+int c_writebuf_byte(void *in, void *out, int iLen)
+{
+int i;
+uint8_t c, *s, *d;
+
+	s = (uint8_t *)in;
+	d = (uint8_t *)out;
+	for (i=0; i<iLen*sizeof(int); i++)
+	{
+// Needed to add some bogus conditional/math ops here to keep the compiler
+// from optimizing this into a memcpy
+		c = *s++;
+		if (i & 1)
+			c += 1;
+		else
+			c -= 1;
+		*d++ = c;
+	}
+	return iLen;
+} /* c_writebuf_byte() */
+
+int c_writebuf_byte_coalesced(void *in, void *out, int iLen)
+{
+int i;
+uint8_t c0,c1,c2,c3, *s;
+uint32_t u32, *d;
+
+	s = (uint8_t *)in;
+	d = (uint32_t *)out;
+	for (i=0; i<iLen*sizeof(int); )
+	{
+// Needed to add some bogus conditional/math ops here to keep the compiler
+// from optimizing this into a memcpy
+		c0 = *s++;
+		if (i & 1)
+			c0 += 1;
+		else
+			c0 -= 1;
+		i++;
+		c1 = *s++;
+		if (i & 1)
+			c1 += 1;
+		else
+			c1 -= 1;
+		i++;
+		c2 = *s++;
+		if (i & 1)
+			c2 += 1;
+		else
+			c2 -= 1;
+		i++;
+		c3 = *s++;
+		if (i & 1)
+			c3 += 1;
+		else
+			c3 -= 1;
+		u32 = c0 | (c1 << 8) | (c2 << 16) | (c3 << 24);
+		i++;
+		*d++ = u32;
+	}
+	return iLen;
+} /* c_writebuf_byte_coalesced() */
+
+int c_writebuf_short(void *in, void *out, int iLen)
+{
+int i;
+uint16_t c, *s, *d;
+
+	s = (uint16_t *)in;
+	d = (uint16_t *)out;
+	for (i=0; i<iLen*2; i++)
+	{
+// Needed to add some bogus conditional/math ops here to keep the compiler
+// from optimizing this into a memcpy
+// with shorts, the compiler can be smart about combining 2 into a word write
+// The code below prevents this optimization
+		c = *s++;
+		if (i & 1)
+			c += 0x101;
+		else
+			c -= 0x101;
+		*d++ = c;
+	}
+	return iLen;
+} /* c_writebuf_short() */
+
+int c_writebuf_word(void *in, void *out, int iLen)
+{
+int i;
+uint32_t c, *s, *d;
+
+	s = (uint32_t *)in;
+	d = (uint32_t *)out;
+	for (i=0; i<iLen; i++)
+	{
+// keep the compiler from turning this into a memcpy
+		c = *s++;
+		if (i & 1)
+			c += 0x1010101;
+		else
+			c -= 0x1010101;
+		*d++ = c;
+	}
+	return iLen;
+} /* c_writebuf_word() */
+
+int c_writebuf_long(void *in, void *out, int iLen)
+{
+int i;
+uint64_t c, *s, *d;
+
+	s = (uint64_t *)in;
+	d = (uint64_t *)out;
+	for (i=0; i<iLen/2; i++)
+	{
+// This will test if your system has a 32-bit or 64-bit memory bus.
+// If it's the same speed or slower than the word version, then you have 
+// a 32-bit memory bus. If faster, it's 64-bits wide
+		c = *s++;
+		if (i & 1)
+			c += 0x0101010101010101LL;
+		else
+			c -= 0x0101010101010101LL;
+		*d++ = c;
+	}
+	return iLen;
+} /* c_writebuf_long() */
 
 // Multiply 2 complex numbers together and store in the output array
 int c_multiply_complex(void *in, void *out, int iLen)
