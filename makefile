@@ -3,7 +3,7 @@ COMPILER=gcc
 PROCESSOR:=$(shell uname -m)
 ifeq ($(PROCESSOR), armv7l)
 ASMTEST=test32
-CFLAGS=-c -fPIE -D USE_NEON -mcpu=cortex-a7 -Wall -O3 -mfloat-abi=hard -mfpu=neon
+CFLAGS=-c -std=c99 -pedantic -fPIE -D USE_NEON -mcpu=cortex-a7 -Wall -O3 -mfloat-abi=hard -mfpu=neon
 LINKFLAGS=-lm -pie
 else ifeq ($(PROCESSOR), aarch64)
 ASMTEST=test64
