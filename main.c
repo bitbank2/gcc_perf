@@ -25,7 +25,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdbool.h>
-#include <linux/time.h>
+#include <time.h>
 #include <string.h>
 #ifdef USE_NEON
 #include <arm_neon.h>
