@@ -63,6 +63,8 @@ enum {
 int MilliTime();
 void RunTest(int iTest, int iMode, int iIterations, float *pFloatArray1, float *pFloatArray2, int32_t *pIntArray1, int32_t *pIntArray2, void *pDest, void *pCompare, bool *bPassed, int iLen);
 
+int c_combine_masks(void *in, void *out, int iLen);
+int simd_combine_masks(void *in, void *out, int iLen); 
 int c_integer_sum(void *in, void *out, int iLen);
 int simd_integer_sum(void *in, void *out, int iLen);
 int c_float_sum(void *in, void *out, int iLen);
@@ -114,7 +116,7 @@ int c_writebuf_long(void *in, void *out, int iLen);
 
 #endif // USE_NEON
 
-#define TEST_COUNT 14
+#define TEST_COUNT 15
 // List of functions to test
 TESTS testList[TEST_COUNT] = {
 {"Write buffer - byte", c_writebuf_byte, NULL, NULL, false},
@@ -123,6 +125,7 @@ TESTS testList[TEST_COUNT] = {
 {"Write buffer - word (32-bits)", c_writebuf_word, NULL, NULL, false},
 {"Write buffer - long (64-bits)", c_writebuf_long, NULL, NULL, false},
 {"Multiply Complex",c_multiply_complex, simd_multiply_complex, asm_multiply_complex, true},
+{"Combine Masks", c_combine_masks, simd_combine_masks, NULL, false},
 {"Integer Sum",c_integer_sum, simd_integer_sum, asm_integer_sum, false},
 {"Float Sum",c_float_sum, simd_float_sum, asm_float_sum, true},
 {"Integer Difference",c_integer_diff, simd_integer_diff, asm_integer_diff, false},
@@ -200,7 +203,7 @@ char *szCPU;
 		iColor = 32;
 	}
 
-	iIterations = 200;
+	iIterations = 2000;
 	iLen = 0x100000; // 4MB (1MB x sizeof(float)) should be enough to not fit in L2 cache    
 	pFloatMem1 = (void *)malloc(iLen * sizeof(float));
 	pFloatMem2 = (void *)malloc(iLen * sizeof(float));
@@ -623,6 +626,83 @@ COMPLEX *b = (COMPLEX *)out;
 #endif // USE_SSE
     return iLen;
 } /* simd_multiply_complex() */
+
+int c_combine_masks(void *in, void *out, int iLen)
+{
+unsigned char *s = (unsigned char *)in;
+unsigned char *d = (unsigned char *)out;
+int iCount = iLen * sizeof(void);
+int x;
+
+   for (x=0; x<iCount; x++)
+   {
+      *d &= ~ *s;
+      d++;
+      s++;
+   }
+   return iLen;
+} /* c_combine_masks() */
+
+int simd_combine_masks(void *in, void *out, int iLen)
+{
+unsigned char *prev = (unsigned char *)in;
+unsigned char *common = (unsigned char *)out;
+int iCount = iLen * sizeof(void);
+int x = 0;
+
+#ifdef USE_SSE
+{
+__m128i xmmIn0, xmmIn1, xmmOut0, xmmOut1;
+
+   for (; x < iCount-31; x+=32) // do 32 at a time
+   {
+      xmmIn0 = _mm_loadu_si128((__m128i*)prev); // unaligned access is still faster than byte-at-a-time
+      xmmIn1 = _mm_loadu_si128((__m128i*)&prev[16]);
+      xmmOut0 = _mm_loadu_si128((__m128i*)common);
+      xmmOut1 = _mm_loadu_si128((__m128i*)&common[16]);
+      prev += 32;
+      xmmOut0 = _mm_andnot_si128(xmmIn0, xmmOut0);
+      xmmOut1 = _mm_andnot_si128(xmmIn1, xmmOut1);
+      _mm_storeu_si128((__m128i*)common, xmmOut0);
+      _mm_storeu_si128((__m128i*)&common[16], xmmOut1);
+      common += 32;
+   } // for x
+   for (; x<iCount-3; x+=4) // all Intel chips allow unaligned word access
+   {
+       *(uint32_t*)common &= ~ (*(uint32_t*)prev);
+       common += 4;
+       prev += 4;
+   } // for x
+}
+#endif // USE_SSE
+#ifdef USE_NEON
+{
+uint8x16_t xmmIn0, xmmIn1, xmmOut0, xmmOut1;
+
+   for (; x < iCount-31; x+=32) // do 32 at a time
+   {
+      xmmIn0 = vld1q_u8(prev); // unaligned access is still faster than byte-at-a-time
+      xmmIn1 = vld1q_u8(&prev[16]);
+      prev += 32;
+      xmmOut0 = vld1q_u8(common);
+      xmmOut1 = vld1q_u8(&common[16]);
+      xmmOut0 = vbicq_u8(xmmOut0, xmmIn0);
+      xmmOut1 = vbicq_u8(xmmOut1, xmmIn1);
+      vst1q_u8(common, xmmOut0);
+      vst1q_u8(&common[16], xmmOut1);
+      common += 32;
+   } // for x
+}
+#endif // USE_NEON
+// finish any straglers one byte at a time
+   for (; x<iCount; x++)
+   {
+      *common &= ~ *prev;
+      common++;
+      prev++;
+   }
+   return iLen;
+} /* simd_combine_masks() */
 
 // Add the values from 2 arrays and store in the destination array
 int c_integer_sum(void *in, void *out, int iLen)
