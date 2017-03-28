@@ -107,14 +107,12 @@ int asm_float_max(void *in, void *out, int iLen) { return 0;};
 int asm_integer_accumulate(void *in, void *out, int iLen) { return 0;};
 int asm_float_accumulate(void *in, void *out, int iLen) { return 0;};
 int asm_multiply_complex(void *in, void *out, int iLen) { return 0;};
-
+#endif // USE_NEON
 int c_writebuf_byte(void *in, void *out, int iLen);
 int c_writebuf_byte_coalesced(void *in, void *out, int iLen);
 int c_writebuf_short(void *in, void *out, int iLen);
 int c_writebuf_word(void *in, void *out, int iLen);
 int c_writebuf_long(void *in, void *out, int iLen);
-
-#endif // USE_NEON
 
 #define TEST_COUNT 15
 // List of functions to test
