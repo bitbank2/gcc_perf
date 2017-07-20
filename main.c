@@ -25,7 +25,7 @@
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdbool.h>
-#include <time.h>
+#include <linux/time.h>
 #include <string.h>
 #ifdef USE_NEON
 #include <arm_neon.h>
@@ -201,7 +201,7 @@ char *szCPU;
 		iColor = 32;
 	}
 
-	iIterations = 2000;
+	iIterations = 200;
 	iLen = 0x100000; // 4MB (1MB x sizeof(float)) should be enough to not fit in L2 cache    
 	pFloatMem1 = (void *)malloc(iLen * sizeof(float));
 	pFloatMem2 = (void *)malloc(iLen * sizeof(float));
