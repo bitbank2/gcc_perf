@@ -18,14 +18,14 @@
 //
 // Project started 3/16/2016
 //
-
+#define _POSIX_C_SOURCE 199309L
 #include <math.h>
 #include <unistd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
 #include <stdbool.h>
-#include <linux/time.h>
+#include <time.h>
 #include <string.h>
 #ifdef USE_NEON
 #include <arm_neon.h>
@@ -83,6 +83,8 @@ int c_integer_accumulate(void *in, void *out, int iLen);
 int simd_integer_accumulate(void *in, void *out, int iLen);
 int c_multiply_complex(void *in, void *out, int iLen);
 int simd_multiply_complex(void *in, void *out, int iLen);
+int simd_16to32(void *in,void *out, int iLen);
+int c_16to32(void *in, void *out, int iLen);
 
 // Using intrinsics in x86 land is sufficient. It's hard to
 // beat the compiler with hand written asm code for these
@@ -114,7 +116,7 @@ int c_writebuf_short(void *in, void *out, int iLen);
 int c_writebuf_word(void *in, void *out, int iLen);
 int c_writebuf_long(void *in, void *out, int iLen);
 
-#define TEST_COUNT 15
+#define TEST_COUNT 16
 // List of functions to test
 TESTS testList[TEST_COUNT] = {
 {"Write buffer - byte", c_writebuf_byte, NULL, NULL, false},
@@ -131,7 +133,8 @@ TESTS testList[TEST_COUNT] = {
 {"Integer Max",c_integer_max, simd_integer_max, asm_integer_max, false},
 {"Float Max", c_float_max, simd_float_max, asm_float_max, true},
 {"Integer Accumulate",c_integer_accumulate, simd_integer_accumulate, asm_integer_accumulate, false},
-{"Float Accumulate", c_float_accumulate, simd_float_accumulate, asm_float_accumulate, true}
+{"Float Accumulate", c_float_accumulate, simd_float_accumulate, asm_float_accumulate, true},
+{"RGB565 to RGB8888", c_16to32, simd_16to32, NULL, false}
 };
 
 /****************************************************************************
@@ -203,12 +206,12 @@ char *szCPU;
 
 	iIterations = 200;
 	iLen = 0x100000; // 4MB (1MB x sizeof(float)) should be enough to not fit in L2 cache    
-	pFloatMem1 = (void *)malloc(iLen * sizeof(float));
-	pFloatMem2 = (void *)malloc(iLen * sizeof(float));
-	pIntMem1 = (void *)malloc(iLen * sizeof(int32_t));
-	pIntMem2 = (void *)malloc(iLen * sizeof(int32_t));
-	pDest = (void *)malloc(iLen * sizeof(float));
-	pCompare = (void *)malloc(iLen * sizeof(float));
+	pFloatMem1 = (void *)malloc(iLen * sizeof(float) + 16);
+	pFloatMem2 = (void *)malloc(iLen * sizeof(float) + 16);
+	pIntMem1 = (void *)malloc(iLen * sizeof(int32_t) + 16);
+	pIntMem2 = (void *)malloc(iLen * sizeof(int32_t) + 16);
+	pDest = (void *)malloc(iLen * sizeof(float) + 16);
+	pCompare = (void *)malloc(iLen * sizeof(float) + 16);
 
 	// Prepare some reasonable test data
 	pf1 = (float *)pFloatMem1;
@@ -391,6 +394,129 @@ void *pSrc1, *pSrc2;
 } /* RunTest() */
 
 // Perf test functions (C and SIMD). ASM is in a separate file
+
+int c_16to32(void *source, void *dest, int iLen)
+{
+// convert inputs into width/height/pitch info
+int iSrcPitch, iWidth, iHeight;
+unsigned char *pSrc, *pDest;
+    pSrc = (unsigned char *)source;
+    pDest = (unsigned char *)dest;
+    iWidth = 128;
+    iHeight = iLen / 128;
+    iSrcPitch = iWidth*sizeof(uint16_t);
+    {
+    int x, y;
+    unsigned short us, *s;
+    uint32_t u32, *d;
+
+    for (y=0; y<iHeight; y++)
+    {
+        s = (unsigned short *)&pSrc[iSrcPitch * y];
+        d = (uint32_t *)&pDest[y * iWidth * 4];
+        for (x=0; x<iWidth; x++)
+        {
+            us = *s++;
+            u32 = (us & 0x1f) << 19;
+            u32 |= (us & 0x1c) << 14; // blue
+            u32 |= (us & 0x7e0) << 5;
+            u32 |= (us & 0x300); // green
+            u32 |= (us & 0xf800) >> 8;
+            u32 |= (us & 0xe000) >> 13;
+            *d++ = u32;
+        } // for x
+    } // for y
+    }
+return iLen;
+
+} /* c_16to32() */
+
+int simd_16to32(void *source, void *dest, int iLen)
+{
+// convert inputs into width/height/pitch info
+int iSrcPitch, iDestPitch, iWidth, iHeight;
+unsigned char *pSrc, *pDest;
+    pSrc = (unsigned char *)source;
+    pDest = (unsigned char *)dest;
+    iWidth = 128;
+    iHeight = iLen / 128;
+    iSrcPitch = iWidth*sizeof(uint16_t);
+    iDestPitch = iWidth*sizeof(uint32_t);
+#ifdef USE_SSE
+   {
+    __m128i xmmIn, xmmOut0, xmmOut1;
+    __m128i xmmMul5, xmmMul6, xmmRMask, xmmGMask, xmmFF;
+    __m128i xmmR, xmmG, xmmT1, xmmB, xmmT2;
+    int x, y;
+    unsigned char *s, *d;
+    xmmMul5 = _mm_set1_epi32(0x01080108);
+    xmmMul6 = _mm_set1_epi32(0x20802080);
+    xmmRMask = _mm_set1_epi32(0xf800f800);
+    xmmGMask = _mm_set1_epi32(0x07e007e0);
+    xmmFF = _mm_set1_epi32(0xff00ff00); // alpha value
+    for (y=0; y<iHeight; y++)
+    {
+        s = &pSrc[y * iSrcPitch];
+        d = &pDest[y * iDestPitch];
+        for (x=0; x<iWidth-7; x+=8)
+        {
+            xmmIn = _mm_loadu_si128((__m128i*)s); // load 8 RGB565 pixels
+            xmmR = _mm_and_si128(xmmIn, xmmRMask);
+            xmmB = _mm_slli_epi16(xmmIn, 11); // position blue bits at top of the word
+            xmmT1 = _mm_mulhi_epu16(xmmR, xmmMul5);
+            xmmT2 = _mm_mulhi_epu16(xmmB, xmmMul5);
+            xmmT1 = _mm_slli_epi16(xmmT1, 8);
+            xmmB = _mm_or_si128(xmmT1, xmmT2); // R+B
+            xmmG = _mm_and_si128(xmmIn, xmmGMask);
+            xmmG = _mm_mulhi_epu16(xmmG, xmmMul6);
+            xmmG = _mm_or_si128(xmmG, xmmFF); // A+G
+            xmmOut0 = _mm_unpacklo_epi8(xmmB, xmmG);
+            xmmOut1 = _mm_unpackhi_epi8(xmmB, xmmG);
+            _mm_storeu_si128((__m128i*)d, xmmOut0); // write 8 RGBA pixels
+            _mm_storeu_si128((__m128i*)&d[16], xmmOut1);
+            s += 16;
+            d += 32;
+        } // for x
+    } // for y
+    }
+#endif
+#ifdef USE_NEON
+    uint16x8_t xmmIn0, xmmIn1;
+    uint8x16_t xmmR, xmmG, xmmB;
+    uint8x16x4_t xmmOut;
+    int x, y;
+    unsigned char *s, *d;
+   
+    xmmOut.val[3] = vdupq_n_u8(0xff); // alpha value
+    for (y=0; y<iHeight; y++)
+    {
+        s = &pSrc[y * iSrcPitch];
+        d = &pDest[y * iDestPitch];
+        for (x=0; x<iWidth-15; x+=16)
+        {
+            __builtin_prefetch(&s[256]);
+            xmmIn0 = vld1q_u16((uint16_t*)s); // load 8 RGB565 pixels
+            xmmIn1 = vld1q_u16((uint16_t*)&s[16]);
+            xmmB = vcombine_u8(vmovn_u16(xmmIn0), vmovn_u16(xmmIn1)); // isolate blue
+            xmmG = vcombine_u8(vshrn_n_u16(xmmIn0, 5), vshrn_n_u16(xmmIn1,5)); // isolate green
+            xmmIn0 = vshrq_n_u16(xmmIn0, 11); // bug in GCC's NEON forces this
+            xmmIn1 = vshrq_n_u16(xmmIn1, 11); // instead of narrowing shift
+            xmmR = vcombine_u8(vmovn_u16(xmmIn0), vmovn_u16(xmmIn1)); // red
+            xmmB = vshlq_n_u8(xmmB, 3); // position blue bits at top of first byte
+            xmmG = vshlq_n_u8(xmmG, 2);
+            xmmR = vshlq_n_u8(xmmR, 3);
+            xmmB = vshlq_n_u8(xmmB, 3);
+            xmmOut.val[0] = vorrq_u8(xmmB, vshrq_n_u8(xmmB, 5)); // finished with Blue
+            xmmOut.val[1] = vorrq_u8(xmmG, vshrq_n_u8(xmmG, 6)); // G
+            xmmOut.val[2] = vorrq_u8(xmmR, vshrq_n_u8(xmmR, 5)); // R
+            vst4q_u8(d, xmmOut);
+            s += 32;
+            d += 64;
+        } // for x
+    } // for y
+#endif // USE_NEON
+return iLen;
+} /* simd_16to32() */
 
 int c_writebuf_byte(void *in, void *out, int iLen)
 {
@@ -629,7 +755,7 @@ int c_combine_masks(void *in, void *out, int iLen)
 {
 unsigned char *s = (unsigned char *)in;
 unsigned char *d = (unsigned char *)out;
-int iCount = iLen * sizeof(void);
+int iCount = iLen * sizeof(uint32_t);
 int x;
 
    for (x=0; x<iCount; x++)
@@ -645,7 +771,7 @@ int simd_combine_masks(void *in, void *out, int iLen)
 {
 unsigned char *prev = (unsigned char *)in;
 unsigned char *common = (unsigned char *)out;
-int iCount = iLen * sizeof(void);
+int iCount = iLen * sizeof(uint32_t);
 int x = 0;
 
 #ifdef USE_SSE
