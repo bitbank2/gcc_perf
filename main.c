@@ -694,8 +694,8 @@ static int iFirst = 0; // to initialize arrays to 0's for max time
 
 	if (iFirst == 0)
 	{
-		memset(in, 0, iLen*sizeof(char *));
-		memset(out, 0, iLen*sizeof(char *));
+		memset(in, 0, iLen*sizeof(uint32_t));
+		memset(out, 0, iLen*sizeof(uint32_t));
 		iFirst++;
 	}
 	dx = 32; dy = 16; // 1K tiles (256 dwords)
@@ -815,7 +815,7 @@ uint8_t c, *s, *d;
 
 	s = (uint8_t *)in;
 	d = (uint8_t *)out;
-	for (i=0; i<iLen*sizeof(int); i++)
+	for (i=0; i<iLen*sizeof(int32_t); i++)
 	{
 // Needed to add some bogus conditional/math ops here to keep the compiler
 // from optimizing this into a memcpy
@@ -837,7 +837,7 @@ uint32_t u32, *d;
 
 	s = (uint8_t *)in;
 	d = (uint32_t *)out;
-	for (i=0; i<iLen*sizeof(int); )
+	for (i=0; i<iLen*sizeof(int32_t); )
 	{
 // Needed to add some bogus conditional/math ops here to keep the compiler
 // from optimizing this into a memcpy
