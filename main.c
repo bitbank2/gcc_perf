@@ -34,6 +34,7 @@
 #include <emmintrin.h>
 #include <tmmintrin.h>
 #include <smmintrin.h>
+#include <immintrin.h>
 #endif
 typedef int (*PFNTEST)(void *src, void *dest, int iLen);
 
@@ -63,6 +64,8 @@ enum {
 int MilliTime();
 void RunTest(int iTest, int iMode, int iIterations, float *pFloatArray1, float *pFloatArray2, int32_t *pIntArray1, int32_t *pIntArray2, void *pDest, void *pCompare, bool *bPassed, int iLen);
 
+int c_update_vertices(void *in, void *out, int iLen);
+int simd_update_vertices(void *in, void *out, int iLen);
 int c_combine_masks(void *in, void *out, int iLen);
 int simd_combine_masks(void *in, void *out, int iLen); 
 int c_integer_sum(void *in, void *out, int iLen);
@@ -116,9 +119,10 @@ int c_writebuf_short(void *in, void *out, int iLen);
 int c_writebuf_word(void *in, void *out, int iLen);
 int c_writebuf_long(void *in, void *out, int iLen);
 
-#define TEST_COUNT 16
+#define TEST_COUNT 17
 // List of functions to test
 TESTS testList[TEST_COUNT] = {
+{"Update Vertices", c_update_vertices, simd_update_vertices, NULL, false},
 {"Write buffer - byte", c_writebuf_byte, NULL, NULL, false},
 {"Write buffer - byte - coalesced", c_writebuf_byte_coalesced, NULL, NULL, false},
 {"Write buffer - short (16-bits)", c_writebuf_short, NULL, NULL, false},
@@ -517,6 +521,163 @@ unsigned char *pSrc, *pDest;
 #endif // USE_NEON
 return iLen;
 } /* simd_16to32() */
+
+void initVertexTest(void *in, int iLen)
+{
+uint32_t *indices;
+float *weights, *inputP, *inputN;
+int indexCount, i, j;
+float fStart = 1.0f;
+
+        indexCount = iLen / 8; // 6/8 float values, 1/8 indices, 1/8 weights
+        weights = (float *)in;
+        indices = (uint32_t *)&weights[indexCount];
+        inputP = &weights[indexCount*2];
+        inputN = &weights[indexCount*5];
+	for (i=0, j=0; i<indexCount; i++, j+=3)
+	{
+		inputP[j] = inputP[j+1] = inputP[j+2] = fStart;
+		inputN[j] = inputN[j+1] = inputN[j+2] = 1.0f - fStart;
+		weights[i] = 1.5f;
+		fStart += 0.01f;
+		indices[i] = indexCount-1-i; // go in reverse order
+	}
+
+} /* initVertexTest() */
+
+int c_update_vertices(void *in, void *out, int iLen)
+{
+static int iOrigSize=0;
+uint32_t w, stride, indexCount;
+uint32_t *indices;
+float *weights, *inputP, *inputN;
+float *outputP, *outputN;
+float oP0, oP1, oP2, oN0, oN1, oN2;
+
+	stride = 3;
+	indexCount = iLen / 8; // 6/8 float values, 1/8 indices, 1/8 weights
+	weights = (float *)in;
+	indices = (uint32_t *)&weights[indexCount];	
+	inputP = &weights[indexCount*2];
+	inputN = &weights[indexCount*5];
+	outputP = (float *)out;
+	outputN = &outputP[3];	
+
+	if (iOrigSize != iLen) // need to initialize the special data
+	{
+		initVertexTest(in, iLen);
+		iOrigSize = iLen;
+	}
+
+	oP0 = oP1 = oP2 = oN0 = oN1 = oN2 = 0; // weighted sums
+        for (w = 0; w < indexCount; w++, indices++, weights++)
+	{
+		const uint32_t index = (*indices) * stride;
+		const float   wgt   =  *weights;
+		oP0 += wgt * inputP[index + 0];
+		oP1 += wgt * inputP[index + 1];
+		oP2 += wgt * inputP[index + 2];
+
+		oN0 += wgt * inputN[index + 0];
+		oN1 += wgt * inputN[index + 1];
+		oN2 += wgt * inputN[index + 2];
+	}
+	outputP[0] = oP0; outputP[1] = oP1; outputP[2] = oP2;
+	outputN[0] = oN0; outputN[1] = oN1; outputN[2] = oN2;
+               
+return iLen;
+} /* c_update_vertices() */
+
+int simd_update_vertices(void *in, void *out, int iLen)
+{
+uint32_t w, stride, indexCount;
+uint32_t *indices;
+float *weights, *inputP, *inputN;
+float *outputP, *outputN;
+float oP0, oP1, oP2, oN0, oN1, oN2;
+float rTemp[8]; // only compiler-safe way to extract the float values from SSE registers
+
+        stride = 3;
+        indexCount = iLen / 8; // 6/8 float values, 1/8 indices, 1/8 weights
+        weights = (float *)in;
+        indices = (uint32_t *)&weights[indexCount];
+        inputP = &weights[indexCount*2];
+        inputN = &weights[indexCount*5];
+	outputP = (float *)out;
+	outputN = &outputP[3];
+
+#ifdef USE_NEON
+                   float32x4_t xmmWeight, xmmInP, xmmInN, xmmOutP, xmmOutN;
+
+                xmmOutP = vdupq_n_f32(0); // initialize weighted sums to zero (integer zero == float zero)
+                xmmOutN = vdupq_n_f32(0);
+                for (w = 0; w < indexCount; w++, indices++, weights++)
+                {
+                    const uint32_t index = (*indices) * stride;
+                    xmmWeight = vdupq_n_f32( *weights );
+                    xmmInP = vld1q_f32(&inputP[index]); // read the indexed vectors from P and N
+                    xmmInN = vld1q_f32(&inputN[index]);
+                    xmmOutP = vmlaq_f32(xmmOutP, xmmWeight, xmmInP); // multiply by the weight
+                    xmmOutN = vmlaq_f32(xmmOutN, xmmWeight, xmmInN);
+                } // for w
+                    vst1q_f32((float *)&rTemp[0], xmmOutP); // slightly ugly hack, but it's the safest way to get
+                    vst1q_f32((float *)&rTemp[4], xmmOutN); // the compiler to properly extract float values
+                    oP0 = rTemp[0]; oP1 = rTemp[1]; oP2 = rTemp[2];
+                    oN0 = rTemp[4]; oN1 = rTemp[5]; oN2 = rTemp[6];
+#endif // USE_NEON
+
+#ifdef USE_SSE
+                   __m128 xmmWeights, xmmWeight;
+		   __m128 xmmInP0, xmmInP1, xmmInP2, xmmInP3;
+		   __m128 xmmInN0, xmmInN1, xmmInN2, xmmInN3, xmmOutP, xmmOutN;
+		__m128i xmmIndices, xmm3;
+                    
+                xmmOutP = _mm_set1_ps(0); // initialize weighted sums to zero
+                xmmOutN = _mm_set1_ps(0);
+		xmm3 = _mm_set1_epi32(3);
+                for (w = 0; w < indexCount-3; w+=4, indices+=4, weights+=4)
+                {
+		    uint32_t index;
+                    xmmIndices = _mm_loadu_si128((__m128i*)indices);
+                    xmmWeights = _mm_loadu_ps( weights );
+		    xmmIndices = _mm_mullo_epi32(xmmIndices, xmm3);
+		    index = _mm_cvtsi128_si32(xmmIndices);
+		xmmIndices = _mm_srli_si128(xmmIndices, 4); // next index
+                    xmmInP0 = _mm_loadu_ps(&inputP[index]); // read the indexed vectors from P and N
+                    xmmInN0 = _mm_loadu_ps(&inputN[index]);
+		index = _mm_cvtsi128_si32(xmmIndices);
+		xmmIndices = _mm_srli_si128(xmmIndices, 4);
+		xmmInP1 = _mm_loadu_ps(&inputP[index]);
+		xmmInN1 = _mm_loadu_ps(&inputN[index]);
+                index = _mm_cvtsi128_si32(xmmIndices);
+                xmmIndices = _mm_srli_si128(xmmIndices, 4);
+                xmmInP2 = _mm_loadu_ps(&inputP[index]);
+                xmmInN2 = _mm_loadu_ps(&inputN[index]);
+                index = _mm_cvtsi128_si32(xmmIndices);
+		xmmWeight = _mm_shuffle_ps(xmmWeights, xmmWeights, _MM_SHUFFLE(0,0,0,0));
+                xmmInP3 = _mm_loadu_ps(&inputP[index]);
+                xmmInN3 = _mm_loadu_ps(&inputN[index]);
+                xmmOutP = _mm_fmadd_ps(xmmWeight, xmmInP0, xmmOutP); // multiply accumulate
+                xmmOutN = _mm_fmadd_ps(xmmWeight, xmmInN0, xmmOutN);
+		xmmWeight = _mm_shuffle_ps(xmmWeights, xmmWeights, _MM_SHUFFLE(1,1,1,1));
+		xmmOutP = _mm_fmadd_ps(xmmWeight, xmmInP1, xmmOutP);
+		xmmOutN = _mm_fmadd_ps(xmmWeight, xmmInN1, xmmOutN);
+		xmmWeight = _mm_shuffle_ps(xmmWeights, xmmWeights, _MM_SHUFFLE(2,2,2,2));
+                xmmOutP = _mm_fmadd_ps(xmmWeight, xmmInP2, xmmOutP);
+                xmmOutN = _mm_fmadd_ps(xmmWeight, xmmInN2, xmmOutN);
+		xmmWeight = _mm_shuffle_ps(xmmWeights, xmmWeights, _MM_SHUFFLE(3,3,3,3));
+                xmmOutP = _mm_fmadd_ps(xmmWeight, xmmInP3, xmmOutP);
+                xmmOutN = _mm_fmadd_ps(xmmWeight, xmmInN3, xmmOutN);
+                } // for w
+                    _mm_storeu_ps((float *)&rTemp[0], xmmOutP); // slightly ugly hack, but it's the safest way to get
+                    _mm_storeu_ps((float *)&rTemp[4], xmmOutN); // the compiler to properly extract float values
+                    oP0 = rTemp[0]; oP1 = rTemp[1]; oP2 = rTemp[2];
+                    oN0 = rTemp[4]; oN1 = rTemp[5]; oN2 = rTemp[6];
+#endif // USE_SSE
+        outputP[0] = oP0; outputP[1] = oP1; outputP[2] = oP2;
+        outputN[0] = oN0; outputN[1] = oN1; outputN[2] = oN2;
+return iLen;
+} /* simd_update_vertices() */
 
 int c_writebuf_byte(void *in, void *out, int iLen)
 {
