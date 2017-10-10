@@ -682,6 +682,7 @@ float rTemp[8]; // only compiler-safe way to extract the float values from SSE r
 return iLen;
 } /* simd_update_vertices() */
 
+<<<<<<< HEAD
 int c_compare_pixels(void *in, void *out, int iLen)
 {
 int x, y, dx, dy, iPitch, iNumTiles, i;

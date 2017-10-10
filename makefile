@@ -10,7 +10,7 @@ ASMTEST=test64
 CFLAGS=-c -fPIE -D USE_NEON -Wall -O3
 LINKFLAGS=-lm -pie
 else ifeq ($(PROCESSOR), x86_64)
-CFLAGS=-c -fPIC -D USE_SSE -Wall -O3 -msse4
+CFLAGS=-c -fPIC -D USE_SSE -Wall -O3 -mavx2 -mfma
 else
 # must be something other than ARMv7/X86
 $(error gcc_perf is only supported on x86 and ARMv7/ARMv8 platforms)
