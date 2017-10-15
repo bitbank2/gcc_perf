@@ -64,6 +64,8 @@ enum {
 int MilliTime();
 void RunTest(int iTest, int iMode, int iIterations, float *pFloatArray1, float *pFloatArray2, int32_t *pIntArray1, int32_t *pIntArray2, void *pDest, void *pCompare, bool *bPassed, int iLen);
 
+int c_compare_pixels(void *in, void *out, int iLen);
+int simd_compare_pixels(void *in, void *out, int iLen);
 int c_update_vertices(void *in, void *out, int iLen);
 int simd_update_vertices(void *in, void *out, int iLen);
 int c_combine_masks(void *in, void *out, int iLen);
@@ -119,9 +121,10 @@ int c_writebuf_short(void *in, void *out, int iLen);
 int c_writebuf_word(void *in, void *out, int iLen);
 int c_writebuf_long(void *in, void *out, int iLen);
 
-#define TEST_COUNT 17
+#define TEST_COUNT 18
 // List of functions to test
 TESTS testList[TEST_COUNT] = {
+{"Compare Pixels", c_compare_pixels, simd_compare_pixels, NULL, false},
 {"Update Vertices", c_update_vertices, simd_update_vertices, NULL, false},
 {"Write buffer - byte", c_writebuf_byte, NULL, NULL, false},
 {"Write buffer - byte - coalesced", c_writebuf_byte_coalesced, NULL, NULL, false},
@@ -191,9 +194,9 @@ char *szCPU;
 	szCPU = "Intel SSE";
 #endif
 	if (iStart == iEnd)
-		printf("running %s test %d, %d-bit word size\n", szCPU, iStart, (int)sizeof(void *)*8);
+		printf("running %s test %d, %d-bit word size\n", szCPU, iStart, (int)sizeof(char *)*8);
 	else
-		printf("running %s tests %d-%d, %d-bit word size\n", szCPU, iStart, iEnd, (int)sizeof(void *)*8);
+		printf("running %s tests %d-%d, %d-bit word size\n", szCPU, iStart, iEnd, (int)sizeof(char *)*8);
 
 	if (argc >= 3)
 	{	// no color
@@ -685,6 +688,132 @@ float rTemp[8]; // only compiler-safe way to extract the float values from SSE r
 return iLen;
 } /* simd_update_vertices() */
 
+int c_compare_pixels(void *in, void *out, int iLen)
+{
+int x, y, dx, dy, iPitch, iNumTiles, i;
+uint32_t *s, *d;
+uint8_t *pSrc = (uint8_t *)in;
+uint8_t *pDest = (uint8_t *)out;
+uint32_t u32RowBits = 0;
+int iTotalChanged = 0;
+static int iFirst = 0; // to initialize arrays to 0's for max time
+
+	if (iFirst == 0)
+	{
+		memset(in, 0, iLen*sizeof(uint32_t));
+		memset(out, 0, iLen*sizeof(uint32_t));
+		iFirst++;
+	}
+	dx = 32; dy = 16; // 1K tiles (256 dwords)
+	iNumTiles = iLen / 256;
+	iPitch = 64; // 1 tile wide
+	for (i=0; i<iNumTiles; i++)
+	{
+	s = (uint32_t *)&pSrc[i*1024];
+	d = (uint32_t *)&pDest[i*1024];
+         for (y = 0; y<dy; y++)
+         {
+            for (x = 0; x < dx; x+=2) // compare pairs of pixels
+            { // test pairs of RGB565 pixels
+               if (s[x] != d[x]) // any change means we mark this strip as being changed and move on
+               {
+                  u32RowBits |= (1 << i);
+                  iTotalChanged++;
+                  y = dy; x = dx; // continue to next tile
+               }
+            } // for x
+            s += (iPitch/4);
+            d += (iPitch/4);
+         } // for y
+	} // for each tile
+	return iTotalChanged;
+} /* c_compare_pixels() */
+
+int simd_compare_pixels(void *in, void *out, int iLen)
+{
+int x, y, dx, dy, iPitch, iPitch4, iNumTiles, i;
+uint32_t *s, *d;
+uint8_t *pSrc = (uint8_t *)in;
+uint8_t *pDest = (uint8_t *)out;
+uint32_t u32RowBits = 0;
+int iTotalChanged = 0;
+
+        dx = 32; dy = 16; // 1K tiles (256 dwords)
+        iNumTiles = iLen / 256;
+        iPitch = 64; // 1 tile wide
+	iPitch4 = iPitch/4;
+        for (i=0; i<iNumTiles; i++)
+        {
+        s = (uint32_t *)&pSrc[i*1024];
+        d = (uint32_t *)&pDest[i*1024];
+         for (y = 0; y<dy; y+=2) // do 2 lines at a time
+         {
+#ifdef USE_SSE
+	__m128i xmmIn0, xmmIn1, xmmIn2, xmmIn3;
+	__m128i xmmOut0, xmmOut1, xmmOut2, xmmOut3;
+	__m128i xmmSum0, xmmSum1;
+            for (x = 0; x < dx/2; x+=8) // compare pairs of pixels
+            { // test 2 lines of 8 RGB565 pixels at a time
+               xmmIn0 = _mm_loadu_si128((__m128i*)&s[x]);
+               xmmIn1 = _mm_loadu_si128((__m128i*)&s[x+4]);
+               xmmIn2 = _mm_loadu_si128((__m128i*)&s[x+iPitch4]);
+               xmmIn3 = _mm_loadu_si128((__m128i*)&s[x+4+iPitch4]);
+               xmmOut0 = _mm_loadu_si128((__m128i*)&d[x]);
+               xmmOut1 = _mm_loadu_si128((__m128i*)&d[x+4]);
+               xmmOut2 = _mm_loadu_si128((__m128i*)&d[x+iPitch4]);
+               xmmOut3 = _mm_loadu_si128((__m128i*)&d[x+4+iPitch4]);
+		xmmSum0 = _mm_sad_epu8(xmmIn0, xmmOut0);
+		xmmSum1 = _mm_sad_epu8(xmmIn1, xmmOut1);
+		xmmSum0 = _mm_add_epi32(xmmSum0, _mm_sad_epu8(xmmIn2, xmmOut2));
+		xmmSum1 = _mm_add_epi32(xmmSum1, _mm_sad_epu8(xmmIn3, xmmOut3));
+		xmmSum0 = _mm_add_epi32(xmmSum0, xmmSum1);
+		xmmSum1 = _mm_cmpeq_epi32(xmmSum0, _mm_setzero_si128());
+		if (_mm_movemask_epi8(xmmSum1) != 0xffff) // non-match
+               {
+                  u32RowBits |= (1 << i);
+                  iTotalChanged++;
+                  y = dy; x = dx; // continue to next tile
+               }
+            } // for x
+#endif // USE_SSE
+#ifdef USE_NEON
+        uint16x8_t xmmIn0, xmmIn1, xmmIn2, xmmIn3;
+        uint16x8_t xmmOut0, xmmOut1, xmmOut2, xmmOut3;
+        uint16x8_t xmmSum0, xmmSum1;
+	uint16x4_t xmmHalf;
+	xmmSum0 = xmmSum1 = vdupq_n_u16(0);
+            for (x = 0; x < dx/2; x+=8) // compare pairs of pixels
+            { // test 2 lines of 8 RGB565 pixels at a time
+               xmmIn0 = vld1q_u16((uint16_t*)&s[x]);
+		xmmIn1 = vld1q_u16((uint16_t*)&s[x+4]);
+               xmmIn2 = vld1q_u16((uint16_t*)&s[x+iPitch4]);
+		xmmIn3 = vld1q_u16((uint16_t*)&s[x+4+iPitch4]);
+               xmmOut0 = vld1q_u16((uint16_t*)&d[x]);
+		xmmOut1 = vld1q_u16((uint16_t*)&d[x+4]);
+               xmmOut2 = vld1q_u16((uint16_t*)&d[x+iPitch4]);
+		xmmOut3 = vld1q_u16((uint16_t*)&d[x+4+iPitch4]);
+                xmmSum0 = vabaq_u16(xmmSum0, xmmIn0, xmmOut0);
+                xmmSum1 = vabaq_u16(xmmSum1, xmmIn1, xmmOut1);
+		xmmSum0 = vabaq_u16(xmmSum0, xmmIn2, xmmOut2);
+		xmmSum1 = vabaq_u16(xmmSum1, xmmIn3, xmmOut3);
+                xmmSum0 = vaddq_u16(xmmSum0, xmmSum1);
+		xmmHalf = vadd_u16(vget_low_u16(xmmSum0), vget_high_u16(xmmSum0));
+		xmmHalf = vpadd_u16(xmmHalf, xmmHalf); // 4 to 2
+                if (vget_lane_u32(vreinterpret_u32_u16(xmmHalf), 0) != 0) // non-match
+               {
+                  u32RowBits |= (1 << i);
+                  iTotalChanged++;
+                  y = dy; x = dx; // continue to next tile
+               }
+            } // for x
+#endif // USE_NEON
+            s += (iPitch/2); // skip 2 lines
+            d += (iPitch/2);
+         } // for y
+        } // for each tile
+	return iTotalChanged;
+} /* simd_compare_pixels() */
+
 int c_writebuf_byte(void *in, void *out, int iLen)
 {
 int i;
@@ -692,7 +821,7 @@ uint8_t c, *s, *d;
 
 	s = (uint8_t *)in;
 	d = (uint8_t *)out;
-	for (i=0; i<iLen*sizeof(int); i++)
+	for (i=0; i<iLen*sizeof(int32_t); i++)
 	{
 // Needed to add some bogus conditional/math ops here to keep the compiler
 // from optimizing this into a memcpy
@@ -714,7 +843,7 @@ uint32_t u32, *d;
 
 	s = (uint8_t *)in;
 	d = (uint32_t *)out;
-	for (i=0; i<iLen*sizeof(int); )
+	for (i=0; i<iLen*sizeof(int32_t); )
 	{
 // Needed to add some bogus conditional/math ops here to keep the compiler
 // from optimizing this into a memcpy
