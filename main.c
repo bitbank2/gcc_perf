@@ -424,9 +424,10 @@ unsigned char *pSrc, *pDest;
             u32 = (us & 0x1f) << 19;
             u32 |= (us & 0x1c) << 14; // blue
             u32 |= (us & 0x7e0) << 5;
-            u32 |= (us & 0x300); // green
+            u32 |= ((us & 0x600) >> 1); // green
             u32 |= (us & 0xf800) >> 8;
-            u32 |= (us & 0xe000) >> 13;
+            u32 |= (us & 0xe000) >> 11;
+            u32 |= 0xff000000; // alpha
             *d++ = u32;
         } // for x
     } // for y
@@ -448,8 +449,8 @@ unsigned char *pSrc, *pDest;
     iDestPitch = iWidth*sizeof(uint32_t);
 #ifdef USE_SSE
    {
-    __m128i xmmIn, xmmOut0, xmmOut1;
-    __m128i xmmMul5, xmmMul6, xmmRMask, xmmGMask, xmmFF;
+    __m128i xmmIn, xmmInNext, xmmOut0, xmmOut1;
+    __m128i xmmMul5, xmmMul6, xmmRMask, xmmGMask, xmmFF00, xmm00FF;
     __m128i xmmR, xmmG, xmmT1, xmmB, xmmT2;
     int x, y;
     unsigned char *s, *d;
@@ -457,23 +458,28 @@ unsigned char *pSrc, *pDest;
     xmmMul6 = _mm_set1_epi32(0x20802080);
     xmmRMask = _mm_set1_epi32(0xf800f800);
     xmmGMask = _mm_set1_epi32(0x07e007e0);
-    xmmFF = _mm_set1_epi32(0xff00ff00); // alpha value
+    xmmFF00 = _mm_set1_epi32(0xff00ff00); // alpha value
+    xmm00FF = _mm_set1_epi32(0x00ff00ff); // mask
     for (y=0; y<iHeight; y++)
     {
         s = &pSrc[y * iSrcPitch];
         d = &pDest[y * iDestPitch];
+        xmmInNext = _mm_loadu_si128((__m128i*)s); // pre-load 8 RGB656 pixels
+        s += 16;
         for (x=0; x<iWidth-7; x+=8)
         {
-            xmmIn = _mm_loadu_si128((__m128i*)s); // load 8 RGB565 pixels
+            xmmIn = xmmInNext;
+            xmmInNext = _mm_loadu_si128((__m128i*)s); // load 8 RGB565 pixels
             xmmR = _mm_and_si128(xmmIn, xmmRMask);
             xmmB = _mm_slli_epi16(xmmIn, 11); // position blue bits at top of the word
+            xmmG = _mm_and_si128(xmmIn, xmmGMask);
             xmmT1 = _mm_mulhi_epu16(xmmR, xmmMul5);
             xmmT2 = _mm_mulhi_epu16(xmmB, xmmMul5);
-            xmmT1 = _mm_slli_epi16(xmmT1, 8);
-            xmmB = _mm_or_si128(xmmT1, xmmT2); // R+B
-            xmmG = _mm_and_si128(xmmIn, xmmGMask);
+            xmmT1 = _mm_and_si128(xmmT1, xmm00FF); // mask off unwanted bits
+            xmmT2 = _mm_slli_epi16(xmmT2, 8); // move B to upper byte
             xmmG = _mm_mulhi_epu16(xmmG, xmmMul6);
-            xmmG = _mm_or_si128(xmmG, xmmFF); // A+G
+            xmmB = _mm_or_si128(xmmT1, xmmT2); // R+B
+            xmmG = _mm_or_si128(xmmG, xmmFF00); // A+G
             xmmOut0 = _mm_unpacklo_epi8(xmmB, xmmG);
             xmmOut1 = _mm_unpackhi_epi8(xmmB, xmmG);
             _mm_storeu_si128((__m128i*)d, xmmOut0); // write 8 RGBA pixels
