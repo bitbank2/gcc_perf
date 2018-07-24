@@ -90,6 +90,9 @@ int c_multiply_complex(void *in, void *out, int iLen);
 int simd_multiply_complex(void *in, void *out, int iLen);
 int simd_16to32(void *in,void *out, int iLen);
 int c_16to32(void *in, void *out, int iLen);
+int c_cache_test(void *in, void *out, int iLen);
+int simd_cache_test(void *in, void *out, int iLen);
+int asm_cache_test(void *in, void *out, int iLen);
 
 // Using intrinsics in x86 land is sufficient. It's hard to
 // beat the compiler with hand written asm code for these
@@ -121,9 +124,10 @@ int c_writebuf_short(void *in, void *out, int iLen);
 int c_writebuf_word(void *in, void *out, int iLen);
 int c_writebuf_long(void *in, void *out, int iLen);
 
-#define TEST_COUNT 18
+#define TEST_COUNT 19
 // List of functions to test
 TESTS testList[TEST_COUNT] = {
+{"Cache Test", c_cache_test, simd_cache_test, asm_cache_test, false},
 {"Compare Pixels", c_compare_pixels, simd_compare_pixels, NULL, false},
 {"Update Vertices", c_update_vertices, simd_update_vertices, NULL, false},
 {"Write buffer - byte", c_writebuf_byte, NULL, NULL, false},
@@ -212,7 +216,11 @@ char *szCPU;
 	}
 
 	iIterations = 200;
-	iLen = 0x100000; // 4MB (1MB x sizeof(float)) should be enough to not fit in L2 cache    
+#ifdef USE_SSE
+	iLen = 0x1000000; // 16MB on Intel
+#else
+	iLen = 0x100000; // 1MB on ARM should be enough to not fit in L2 cache    
+#endif
 	pFloatMem1 = (void *)malloc(iLen * sizeof(float) + 16);
 	pFloatMem2 = (void *)malloc(iLen * sizeof(float) + 16);
 	pIntMem1 = (void *)malloc(iLen * sizeof(int32_t) + 16);
@@ -262,7 +270,7 @@ char *szCPU;
 			iTime = MilliTime() - iTime;
 			printf("%s%s%s SIMD (bigger than cache) = %dms\n", szColor, szLabel, szUnColor, iTime);
 		}
-#ifdef USE_NEON
+//#ifdef USE_NEON
 		if (testList[iTest].pASMFunc)
 		{
 			iTime = MilliTime();
@@ -270,7 +278,7 @@ char *szCPU;
 			iTime = MilliTime() - iTime;
 			printf("%s%s%s ASM (bigger than cache) = %dms\n", szColor, szLabel, szUnColor, iTime);
 		}
-#endif
+//#endif
 		if (testList[iTest].pCFunc)
 		{
 			iTime = MilliTime();
@@ -285,7 +293,7 @@ char *szCPU;
 			iTime = MilliTime() - iTime;
 			printf("%s%s%s SIMD (smaller than cache) = %dms\n", szColor, szLabel, szUnColor, iTime);
 		}
-#ifdef USE_NEON
+//#ifdef USE_NEON
 		if (testList[iTest].pASMFunc)
 		{
 			iTime = MilliTime();
@@ -293,7 +301,7 @@ char *szCPU;
 			iTime = MilliTime() - iTime;
 			printf("%s%s%s ASM (smaller than cache) = %dms\n", szColor, szLabel, szUnColor, iTime);
 		}
-#endif
+//#endif
 		iColor++;
 		if (iColor > 33) iColor = 32; // toggle between green and yellow for passing tests
 	}
@@ -530,6 +538,166 @@ unsigned char *pSrc, *pDest;
 #endif // USE_NEON
 return iLen;
 } /* simd_16to32() */
+
+//
+// Simple example of how cache alignment affects performance
+// In this case, we'll implement a memset() function
+// C version = misaligned
+//
+int c_cache_test(void *in, void *out, int iLen)
+{
+unsigned char *s = (unsigned char *)in;
+unsigned char *d = (unsigned char *)out;
+int n = iLen;
+
+   if (s) {}; // suppress warning
+   while (((long)d & 0xf) != 8) // make alignment off by 8 bytes
+   {
+      *d++ = 0;
+      n--;
+   }
+#ifdef USE_SSE
+   {
+   __m128i xmm_zero = _mm_setzero_si128();
+      while (n >= 64) // do 4 writes of 16-bytes at a time
+      {
+         _mm_storeu_si128((__m128i*)d, xmm_zero);
+         _mm_storeu_si128((__m128i*)&d[16], xmm_zero);
+         _mm_storeu_si128((__m128i*)&d[32], xmm_zero);
+         _mm_storeu_si128((__m128i*)&d[48], xmm_zero);
+         d += 64;
+         n -= 64;
+      } // while
+   }
+#endif // USE_SSE
+#ifdef USE_NEON
+   {
+   uint8x16_t xmm_zero = vdupq_n_u8(0);
+      while (n >= 64) // do 4 writes of 16-bytes at a time
+      {
+         vst1q_u8(d, xmm_zero);
+         vst1q_u8(&d[16], xmm_zero);
+         vst1q_u8(&d[32], xmm_zero);
+         vst1q_u8(&d[48], xmm_zero);
+         d += 64;
+         n -= 64;
+      } // while
+   }
+#endif // USE_NEON
+// finish stragglers
+   while (n)
+   {
+      *d++ = 0;
+      n--;
+   }
+   return 0;
+} /* c_cache_test() */
+
+//
+// In this version, we'll purposely align the writes on cache boundaries
+//
+int simd_cache_test(void *in, void *out, int iLen)
+{
+unsigned char *s = (unsigned char *)in;
+unsigned char *d = (unsigned char *)out;
+int n = iLen;
+
+   if (s) {}; // suppress warning   
+   while (((long)d & 0xf) != 0) // make sure it's 16-byte aligned
+   {  
+      *d++ = 0;
+      n--;
+   }
+#ifdef USE_SSE
+   {  
+   __m128i xmm_zero = _mm_setzero_si128();
+      while (n >= 64) // do 4 writes of 16-bytes at a time
+      {  
+         _mm_storeu_si128((__m128i*)d, xmm_zero);
+         _mm_storeu_si128((__m128i*)&d[16], xmm_zero);
+         _mm_storeu_si128((__m128i*)&d[32], xmm_zero);
+         _mm_storeu_si128((__m128i*)&d[48], xmm_zero);
+         d += 64;
+         n -= 64;
+      } // while
+   }
+#endif // USE_SSE
+#ifdef USE_NEON
+   {
+   uint8x16_t xmm_zero = vdupq_n_u8(0);
+      while (n >= 64) // do 4 writes of 16-bytes at a time
+      {
+         vst1q_u8(d, xmm_zero);
+         vst1q_u8(&d[16], xmm_zero);
+         vst1q_u8(&d[32], xmm_zero);
+         vst1q_u8(&d[48], xmm_zero);
+         d += 64;
+         n -= 64;
+      } // while
+   }
+#endif // USE_NEON
+
+// finish stragglers
+   while (n) 
+   {  
+      *d++ = 0;
+      n--;
+   } 
+   return 0;
+} /* simd_cache_test() */
+
+//
+// For this version, we'll use the non-temporal version of the write
+// instruction to not pollute the cache
+//
+int asm_cache_test(void *in, void *out, int iLen)
+{
+unsigned char *s = (unsigned char *)in;
+unsigned char *d = (unsigned char *)out;
+int n = iLen;
+
+   if (s) {}; // suppress warning   
+   while (((long)d & 0xf) != 0) // make sure it's 16-byte aligned
+   {  
+      *d++ = 0;
+      n--;
+   }
+#ifdef USE_SSE
+   {  
+   __m128i xmm_zero = _mm_setzero_si128();
+      while (n >= 64) // do 4 writes of 16-bytes at a time
+      {  
+         _mm_stream_si128((__m128i*)d, xmm_zero);
+         _mm_stream_si128((__m128i*)&d[16], xmm_zero);
+         _mm_stream_si128((__m128i*)&d[32], xmm_zero);
+         _mm_stream_si128((__m128i*)&d[48], xmm_zero);
+         d += 64;
+         n -= 64;
+      } // while
+   }
+#endif // USE_SSE
+#ifdef USE_NEON
+   {
+   uint8x16_t xmm_zero = vdupq_n_u8(0);
+      while (n >= 64) // do 4 writes of 16-bytes at a time
+      {
+         vst1q_u8(d, xmm_zero);
+         vst1q_u8(&d[16], xmm_zero);
+         vst1q_u8(&d[32], xmm_zero);
+         vst1q_u8(&d[48], xmm_zero);
+         d += 64;
+         n -= 64;
+      } // while
+   }
+#endif // USE_NEON
+// finish stragglers
+   while (n) 
+   {  
+      *d++ = 0;
+      n--;
+   } 
+   return 0;
+} /* asm_cache_test() */
 
 void initVertexTest(void *in, int iLen)
 {
