@@ -18,6 +18,19 @@
 //
 // Project started 3/16/2016
 //
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// This program is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+// GNU General Public License for more details.
+//
+// You should have received a copy of the GNU General Public License
+// along with this program.  If not, see <http://www.gnu.org/licenses/>.
+//
 #define _POSIX_C_SOURCE 199309L
 #include <math.h>
 #include <unistd.h>
@@ -217,9 +230,9 @@ char *szCPU;
 
 	iIterations = 200;
 #ifdef USE_SSE
-	iLen = 0x1000000; // 16MB on Intel
+	iLen = 0x400000; // 16MB on Intel
 #else
-	iLen = 0x100000; // 1MB on ARM should be enough to not fit in L2 cache    
+	iLen = 0x100000; // 4MB on ARM should be enough to not fit in L2 cache    
 #endif
 	pFloatMem1 = (void *)malloc(iLen * sizeof(float) + 16);
 	pFloatMem2 = (void *)malloc(iLen * sizeof(float) + 16);
@@ -548,7 +561,7 @@ int c_cache_test(void *in, void *out, int iLen)
 {
 unsigned char *s = (unsigned char *)in;
 unsigned char *d = (unsigned char *)out;
-int n = iLen;
+int n = iLen*4;
 
    if (s) {}; // suppress warning
    while (((long)d & 0xf) != 8) // make alignment off by 8 bytes
@@ -600,7 +613,7 @@ int simd_cache_test(void *in, void *out, int iLen)
 {
 unsigned char *s = (unsigned char *)in;
 unsigned char *d = (unsigned char *)out;
-int n = iLen;
+int n = iLen*4;
 
    if (s) {}; // suppress warning   
    while (((long)d & 0xf) != 0) // make sure it's 16-byte aligned
@@ -654,7 +667,7 @@ int asm_cache_test(void *in, void *out, int iLen)
 {
 unsigned char *s = (unsigned char *)in;
 unsigned char *d = (unsigned char *)out;
-int n = iLen;
+int n = iLen*4;
 
    if (s) {}; // suppress warning   
    while (((long)d & 0xf) != 0) // make sure it's 16-byte aligned
