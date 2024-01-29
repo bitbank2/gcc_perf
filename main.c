@@ -43,6 +43,9 @@
 #ifdef USE_NEON
 #include <arm_neon.h>
 #endif
+#ifdef USE_RISCV
+#include <riscv_vector.h>
+#endif
 #ifdef USE_SSE
 #include <emmintrin.h>
 #include <tmmintrin.h>
@@ -207,6 +210,8 @@ char *szCPU;
 
 #ifdef USE_NEON
 	szCPU = "ARM NEON";
+#elif defined (USE_RISCV)
+	szCPU = "RISC-V V1.0";
 #else
 	szCPU = "Intel SSE";
 #endif
@@ -929,6 +934,31 @@ int iTotalChanged = 0;
         d = (uint32_t *)&pDest[i*1024];
          for (y = 0; y<dy; y+=2) // do 2 lines at a time
          {
+#ifdef USE_RISCV
+	vuint8m8_t vIn0, vIn1;
+	vuint8m8_t vOut0, vOut1;
+	vbool1_t not_equal0, not_equal1;
+	uint8_t *s8 = (uint8_t *)s, *d8 = (uint8_t *)d;
+	size_t vl;
+	int iCount = dx;
+	    for (x=0; iCount > 0; iCount -= vl, x+=vl) // compare as many pixelsas possible per iteration
+	    {
+		vl = __riscv_vsetvl_e8m8(iCount);
+		vIn0 = __riscv_vle8_v_u8m8(&s8[x], vl);
+                vIn1 = __riscv_vle8_v_u8m8(&s8[x+iPitch], vl);
+                vOut0 = __riscv_vle8_v_u8m8(&d8[x], vl);
+		vOut1 = __riscv_vle8_v_u8m8(&d8[x+iPitch], vl);
+		not_equal0 = __riscv_vmsne_vv_u8m8_b1(vIn0, vOut0, vl);
+		not_equal1 = __riscv_vmsne_vv_u8m8_b1(vIn1, vOut1, vl);
+		not_equal0 = __riscv_vmor_mm_b1(not_equal0, not_equal1, vl);
+                if (__riscv_vfirst_m_b1(not_equal0, vl)) // non-match
+                {
+                    u32RowBits |= (1 << i);
+                    iTotalChanged++;
+                    y = dy; iCount = 0; // continue to next tile
+                }
+            } // for x
+#endif // USE_RISCV
 #ifdef USE_SSE
 	__m128i xmmIn0, xmmIn1, xmmIn2, xmmIn3;
 	__m128i xmmOut0, xmmOut1, xmmOut2, xmmOut3;
