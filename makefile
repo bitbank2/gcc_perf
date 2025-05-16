@@ -9,6 +9,10 @@ else ifeq ($(PROCESSOR), riscv64)
 ASMTEST=empty
 CFLAGS=-c -std=c99 -march=rv64gv -D USE_RISCV -Wall -O3
 LINKFLAGS=-lm -pie
+else ifeq ($(PROCESSOR), arm64)
+ASMTEST=empty
+CFLAGS=-c -fPIE -D USE_NEON -D NO_ASM -Wall -O3
+LINKFLAGS=-lm -pie
 else ifeq ($(PROCESSOR), aarch64)
 ASMTEST=test64
 CFLAGS=-c -fPIE -D USE_NEON -Wall -O3
@@ -22,7 +26,7 @@ endif
 
 all: gcc_perf
 
-ifeq ($(PROCESSOR), x86_64)
+ifeq ($(PROCESSOR), $(filter $(PROCESSOR), x86_64 arm64))
 
 gcc_perf: main.o
 	$(COMPILER) main.o $(LINKFLAGS) -o gcc_perf

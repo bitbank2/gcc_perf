@@ -113,7 +113,7 @@ int asm_cache_test(void *in, void *out, int iLen);
 // Using intrinsics in x86 land is sufficient. It's hard to
 // beat the compiler with hand written asm code for these
 // type of functions
-#ifdef USE_NEON
+#if defined( USE_NEON ) && !defined(NO_ASM)
 extern int asm_integer_sum(void *in, void *out, int iLen);
 extern int asm_float_sum(void *in, void *out, int iLen);
 extern int asm_integer_diff(void *in, void *out, int iLen);
