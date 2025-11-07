@@ -22,9 +22,9 @@
 // V8-V15 callee-saved registers
 //
   .align 2
-  .global asm_float_sum
-  .type asm_float_sum, %function
-asm_float_sum:
+  .global _asm_float_sum
+//  .type asm_float_sum, %function
+_asm_float_sum:
 // x0 = *in, x1 = *out, x2 = iLen
    mov x9,x2		// count
    mov x10,#15		// min loop count
@@ -57,9 +57,9 @@ float_sum_exit:
    ret
 
   .align 2
-  .global asm_integer_sum
-  .type asm_integer_sum, %function
-asm_integer_sum:
+  .global _asm_integer_sum
+//  .type asm_integer_sum, %function
+_asm_integer_sum:
 // x0 = *in, x1 = *out, x2 = iLen
    mov x9,x2		// count
    mov x10,#15		// min loop count
@@ -92,21 +92,21 @@ integer_sum_exit:
    ret
 
   .align 2
-  .global asm_float_product
-  .type asm_float_product, %function
-asm_float_product:
+  .global _asm_float_product
+//  .type asm_float_product, %function
+_asm_float_product:
    ret
 
   .align 2
-  .global asm_integer_product
-  .type asm_integer_product, %function
-asm_integer_product:
+  .global _asm_integer_product
+//  .type asm_integer_product, %function
+_asm_integer_product:
    ret
 
   .align 2
-  .global asm_integer_max
-  .type asm_integer_max, %function
-asm_integer_max:
+  .global _asm_integer_max
+//  .type asm_integer_max, %function
+_asm_integer_max:
    ld1 {v0.16b, v1.16b},[x0]
 integer_max_top:
    ld1 {v2.16b, v3.16b},[x0]
@@ -126,9 +126,9 @@ integer_max_top:
    ret
 
   .align 2
-  .global asm_float_max
-  .type asm_float_max, %function
-asm_float_max:
+  .global _asm_float_max
+//  .type asm_float_max, %function
+_asm_float_max:
    ld1 {v0.16b, v1.16b},[x0]
 float_max_top:
    ld1 {v2.16b, v3.16b},[x0]
@@ -148,9 +148,9 @@ float_max_top:
    ret
 
   .align 2
-  .global asm_integer_accumulate
-  .type asm_integer_accumulate, %function
-asm_integer_accumulate:
+  .global _asm_integer_accumulate
+//  .type asm_integer_accumulate, %function
+_asm_integer_accumulate:
 // x0 = *in, x1 = *out, x2 = iLen
    mov x9,x2		// count
    mov x10,#0
@@ -185,9 +185,9 @@ integer_acc_exit:
    ret
 
   .align 2
-  .global asm_float_accumulate
-  .type asm_float_accumulate, %function
-asm_float_accumulate:
+  .global _asm_float_accumulate
+//  .type asm_float_accumulate, %function
+_asm_float_accumulate:
 // x0 = *in, x1 = *out, x2 = iLen
    mov x9,x2		// count
    mov x10,#0
@@ -222,9 +222,9 @@ float_acc_exit:
    ret
 
   .align 2
-  .global asm_multiply_complex
-  .type asm_multiply_complex, %function
-asm_multiply_complex:
+  .global _asm_multiply_complex
+//  .type asm_multiply_complex, %function
+_asm_multiply_complex:
   add x4,x0,#32		// offset to grab 8 pairs of complex values
   add x5,x1,#32
   lsr x3,x2,#1		// number of complex values = floats/2
@@ -255,9 +255,9 @@ multiply_complex_top:
    ret
 
   .align 2
-  .global asm_integer_diff
-  .type asm_integer_diff, %function
-asm_integer_diff:
+  .global _asm_integer_diff
+//  .type asm_integer_diff, %function
+_asm_integer_diff:
 // x0 = *in, x1 = *out, x2 = iLen
    mov x9,x2		// count
    mov x10,#15		// min loop count
@@ -290,9 +290,9 @@ integer_diff_exit:
    ret
 
   .align 2
-  .global asm_float_diff
-  .type asm_float_diff, %function
-asm_float_diff:
+  .global _asm_float_diff
+//  .type asm_float_diff, %function
+_asm_float_diff:
 // x0 = *in, x1 = *out, x2 = iLen
    mov x9,x2		// count
    mov x10,#15		// min loop count

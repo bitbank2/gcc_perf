@@ -17,10 +17,14 @@ else ifeq ($(PROCESSOR), aarch64)
 ASMTEST=test64
 CFLAGS=-c -fPIE -D USE_NEON -Wall -O3
 LINKFLAGS=-lm -pie
+else ifeq ($(PROCESSOR), arm64)
+ASMTEST=test64
+CFLAGS=-c -fPIE -D USE_NEON -Wall -O3
+LINKFLAGS=-lm
 else ifeq ($(PROCESSOR), x86_64)
 CFLAGS=-c -fPIC -D USE_SSE -Wall -O3 -mavx2 -mfma
 else
-# must be something other than ARMv7/X86
+# must be something other than ARM/X86
 $(error gcc_perf is only supported on x86 and ARMv7/ARMv8 platforms)
 endif
 
@@ -48,5 +52,5 @@ $(ASMTEST).o: $(ASMTEST).s
 endif
 
 clean:
-	rm -rf *o gcc_perf
+	rm -rf *.o gcc_perf
 
