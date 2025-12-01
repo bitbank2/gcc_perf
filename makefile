@@ -15,7 +15,7 @@ CFLAGS=-c -fPIE -D USE_NEON -D NO_ASM -Wall -O3
 LINKFLAGS=-lm -pie
 else ifeq ($(PROCESSOR), aarch64)
 ASMTEST=test64
-CFLAGS=-c -fPIE -D USE_NEON -Wall -O3
+CFLAGS=-c -fPIE -D USE_NEON -D NO_ASM -Wall -O3
 LINKFLAGS=-lm -pie
 else ifeq ($(PROCESSOR), arm64)
 ASMTEST=test64
