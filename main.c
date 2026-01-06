@@ -625,18 +625,23 @@ int n = iLen*4; // count in bytes
 
 #ifdef USE_NEON
    {
-   uint8x16_t xmm_test1, xmm_test2;
-   uint8x16x2_t xmm_test12;
+   uint8x16_t xmm_test1, xmm_test2, xmm_test3, xmm_test4;
+   uint8x16x2_t xmm_out_a, xmm_out_b;
 
       while (n >= 64) { // do 4 writes of 16-bytes at a time
          xmm_test1 = vld1q_u8(s);
          xmm_test2 = vld1q_u8(&s[16]);
-         xmm_test12 = vzipq_u8(xmm_test1, xmm_test2);
-         vst1q_u8(d, xmm_test12.val[0]);
-         vst1q_u8(&d[16], xmm_test12.val[1]);
-         s += 32;
-         d += 32;
-         n -= 32;
+         xmm_test3 = vld1q_u8(&s[32]);
+         xmm_test4 = vld1q_u8(&s[48]);
+         xmm_out_a = vzipq_u8(xmm_test1, xmm_test2);
+         xmm_out_b = vzipq_u8(xmm_test3, xmm_test4);
+         vst1q_u8(d, xmm_out_a.val[0]);
+         vst1q_u8(&d[16], xmm_out_a.val[1]);
+         vst1q_u8(&d[32], xmm_out_b.val[0]);
+         vst1q_u8(&d[48], xmm_out_b.val[1]);
+         s += 64;
+         d += 64;
+         n -= 64;
       } // while
    }
 #endif // USE_NEON
@@ -653,18 +658,23 @@ int n = iLen*4; // count in bytes
 
 #ifdef USE_NEON
    {
-   uint8x16_t xmm_test1, xmm_test2; 
-   uint8x16x2_t xmm_test12;
+   uint8x16_t xmm_test1, xmm_test2, xmm_test3, xmm_test4; 
+   uint8x16x2_t xmm_out_a, xmm_out_b;
 
       while (n >= 64) { // do 4 writes of 16-bytes at a time
          xmm_test1 = vld1q_u8(s);
          xmm_test2 = vld1q_u8(&s[16]);
-         xmm_test12.val[0] = xmm_test1;
-         xmm_test12.val[1] = xmm_test2;
-         vst2q_u8(d, xmm_test12);
-         s += 32;
-         d += 32;
-         n -= 32;
+         xmm_test3 = vld1q_u8(&s[32]);
+         xmm_test4 = vld1q_u8(&s[48]);
+         xmm_out_a.val[0] = xmm_test1;
+         xmm_out_a.val[1] = xmm_test2;
+         xmm_out_b.val[0] = xmm_test3;
+         xmm_out_b.val[1] = xmm_test4;
+         vst2q_u8(d, xmm_out_a);
+         vst2q_u8(&d[32], xmm_out_b);
+         s += 64;
+         d += 64;
+         n -= 64;
       } // while
    }
 #endif // USE_NEON
