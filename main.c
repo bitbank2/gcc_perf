@@ -109,6 +109,8 @@ int c_16to32(void *in, void *out, int iLen);
 int c_cache_test(void *in, void *out, int iLen);
 int simd_cache_test(void *in, void *out, int iLen);
 int asm_cache_test(void *in, void *out, int iLen);
+int simd_vst1(void *in, void *out, int iLen);
+int simd_vst2(void *in, void *out, int iLen);
 
 // Using intrinsics in x86 land is sufficient. It's hard to
 // beat the compiler with hand written asm code for these
@@ -140,7 +142,7 @@ int c_writebuf_short(void *in, void *out, int iLen);
 int c_writebuf_word(void *in, void *out, int iLen);
 int c_writebuf_long(void *in, void *out, int iLen);
 
-#define TEST_COUNT 19
+#define TEST_COUNT 21
 // List of functions to test
 TESTS testList[TEST_COUNT] = {
 {"Cache Test", c_cache_test, simd_cache_test, asm_cache_test, false},
@@ -161,7 +163,9 @@ TESTS testList[TEST_COUNT] = {
 {"Float Max", c_float_max, simd_float_max, asm_float_max, true},
 {"Integer Accumulate",c_integer_accumulate, simd_integer_accumulate, asm_integer_accumulate, false},
 {"Float Accumulate", c_float_accumulate, simd_float_accumulate, asm_float_accumulate, true},
-{"RGB565 to RGB8888", c_16to32, simd_16to32, NULL, false}
+{"RGB565 to RGB8888", c_16to32, simd_16to32, NULL, false},
+{"Store with vst1...", NULL, simd_vst1, NULL, false},
+{"Store with vst2...", NULL, simd_vst2, NULL, false},
 };
 
 /****************************************************************************
@@ -610,6 +614,62 @@ int n = iLen*4;
    }
    return 0;
 } /* c_cache_test() */
+//
+// Test the speed of storing with vst1q
+//
+int simd_vst1(void *in, void *out, int iLen)
+{
+unsigned char *s = (unsigned char *)in;
+unsigned char *d = (unsigned char *)out;
+int n = iLen*4; // count in bytes
+
+#ifdef USE_NEON
+   {
+   uint8x16_t xmm_test1, xmm_test2;
+   uint8x16x2_t xmm_test12;
+
+      while (n >= 64) { // do 4 writes of 16-bytes at a time
+         xmm_test1 = vld1q_u8(s);
+         xmm_test2 = vld1q_u8(&s[16]);
+         xmm_test12 = vzipq_u8(xmm_test1, xmm_test2);
+         vst1q_u8(d, xmm_test12.val[0]);
+         vst1q_u8(&d[16], xmm_test12.val[1]);
+         s += 32;
+         d += 32;
+         n -= 32;
+      } // while
+   }
+#endif // USE_NEON
+   return 0;
+} /* simd_vst1() */
+//
+// Test the speed of storing with vst2q
+//
+int simd_vst2(void *in, void *out, int iLen)
+{
+unsigned char *s = (unsigned char *)in;
+unsigned char *d = (unsigned char *)out;
+int n = iLen*4; // count in bytes
+
+#ifdef USE_NEON
+   {
+   uint8x16_t xmm_test1, xmm_test2; 
+   uint8x16x2_t xmm_test12;
+
+      while (n >= 64) { // do 4 writes of 16-bytes at a time
+         xmm_test1 = vld1q_u8(s);
+         xmm_test2 = vld1q_u8(&s[16]);
+         xmm_test12.val[0] = xmm_test1;
+         xmm_test12.val[1] = xmm_test2;
+         vst2q_u8(d, xmm_test12);
+         s += 32;
+         d += 32;
+         n -= 32;
+      } // while
+   }
+#endif // USE_NEON
+   return 0;
+} /* simd_vst2() */
 
 //
 // In this version, we'll purposely align the writes on cache boundaries
